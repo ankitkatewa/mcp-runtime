@@ -14,6 +14,7 @@ package cli
 
 import (
 	"io"
+	"math"
 	"os"
 
 	"github.com/pterm/pterm"
@@ -195,12 +196,19 @@ func (p *Printer) Cyan(msg string) string {
 
 func isTerminalWriter(writer io.Writer) bool {
 	if writer == nil {
-		return term.IsTerminal(int(os.Stdout.Fd()))
+		return isTerminalFD(os.Stdout.Fd())
 	}
 	if f, ok := writer.(interface{ Fd() uintptr }); ok {
-		return term.IsTerminal(int(f.Fd()))
+		return isTerminalFD(f.Fd())
 	}
 	return false
+}
+
+func isTerminalFD(fd uintptr) bool {
+	if fd > uintptr(math.MaxInt) {
+		return false
+	}
+	return term.IsTerminal(int(fd)) // #nosec G115 -- fd is range-checked above before conversion.
 }
 
 // SpinnerStart starts a spinner with the given message. Returns a stop function.

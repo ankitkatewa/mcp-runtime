@@ -13,6 +13,8 @@ type SetupPlanInput struct {
 	IngressManifestChanged bool
 	ForceIngressInstall    bool
 	TLSEnabled             bool
+	TestMode               bool
+	OperatorArgs           []string
 }
 
 // SetupPlan captures the resolved setup decisions.
@@ -22,6 +24,8 @@ type SetupPlan struct {
 	Ingress             ingressOptions
 	RegistryManifest    string
 	TLSEnabled          bool
+	TestMode            bool
+	OperatorArgs        []string
 }
 
 // BuildSetupPlan resolves CLI inputs into a concrete setup plan.
@@ -50,5 +54,7 @@ func BuildSetupPlan(input SetupPlanInput) SetupPlan {
 		},
 		RegistryManifest: registryManifest,
 		TLSEnabled:       input.TLSEnabled,
+		TestMode:         input.TestMode,
+		OperatorArgs:     input.OperatorArgs,
 	}
 }

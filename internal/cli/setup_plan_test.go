@@ -65,6 +65,33 @@ func TestBuildSetupPlan_CustomIngressManifest(t *testing.T) {
 	}
 }
 
+func TestBuildSetupPlan_PreservesTestModeAndOperatorArgs(t *testing.T) {
+	operatorArgs := []string{"--metrics-bind-address=:9090", "--leader-elect=false"}
+	plan := BuildSetupPlan(SetupPlanInput{
+		RegistryType:           "docker",
+		RegistryStorageSize:    "20Gi",
+		IngressMode:            "traefik",
+		IngressManifest:        "config/ingress/overlays/http",
+		IngressManifestChanged: false,
+		ForceIngressInstall:    false,
+		TLSEnabled:             false,
+		TestMode:               true,
+		OperatorArgs:           operatorArgs,
+	})
+
+	if !plan.TestMode {
+		t.Fatal("expected test mode to be preserved")
+	}
+	if len(plan.OperatorArgs) != len(operatorArgs) {
+		t.Fatalf("expected %d operator args, got %d", len(operatorArgs), len(plan.OperatorArgs))
+	}
+	for i := range operatorArgs {
+		if plan.OperatorArgs[i] != operatorArgs[i] {
+			t.Fatalf("expected operator arg %d to be %q, got %q", i, operatorArgs[i], plan.OperatorArgs[i])
+		}
+	}
+}
+
 type callRecorder struct {
 	calls []string
 	waits []string
@@ -146,7 +173,7 @@ func TestSetupPlatformWithDeps_ExternalRegistry(t *testing.T) {
 		EnsureNamespace:             func(string) error { rec.add("ensure-ns"); return nil },
 		GetPlatformRegistryURL:      func(*zap.Logger) string { return "registry.local" },
 		PushOperatorImageToInternal: func(*zap.Logger, string, string, string) error { rec.add("push-internal"); return nil },
-		DeployOperatorManifests:     func(*zap.Logger, string) error { rec.add("deploy-operator"); return nil },
+		DeployOperatorManifests:     func(*zap.Logger, string, []string) error { rec.add("deploy-operator"); return nil },
 		ConfigureProvisionedRegistryEnv: func(*ExternalRegistryConfig, string) error {
 			rec.add("configure-env")
 			return nil
@@ -218,7 +245,7 @@ func TestSetupPlatformWithDeps_InternalRegistryTLS(t *testing.T) {
 			rec.add("push-internal")
 			return nil
 		},
-		DeployOperatorManifests: func(*zap.Logger, string) error { rec.add("deploy-operator"); return nil },
+		DeployOperatorManifests: func(*zap.Logger, string, []string) error { rec.add("deploy-operator"); return nil },
 		ConfigureProvisionedRegistryEnv: func(*ExternalRegistryConfig, string) error {
 			rec.add("configure-env")
 			return nil
@@ -297,7 +324,7 @@ func TestSetupPlatformWithDeps_ExternalRegistryTLS(t *testing.T) {
 			rec.add("push-internal")
 			return nil
 		},
-		DeployOperatorManifests: func(*zap.Logger, string) error { rec.add("deploy-operator"); return nil },
+		DeployOperatorManifests: func(*zap.Logger, string, []string) error { rec.add("deploy-operator"); return nil },
 		ConfigureProvisionedRegistryEnv: func(*ExternalRegistryConfig, string) error {
 			rec.add("configure-env")
 			return nil
@@ -377,7 +404,7 @@ func TestSetupPlatformWithDeps_DiagnosticsOnRegistryWaitFailure(t *testing.T) {
 		PushOperatorImageToInternal: func(*zap.Logger, string, string, string) error {
 			return nil
 		},
-		DeployOperatorManifests:         func(*zap.Logger, string) error { return nil },
+		DeployOperatorManifests:         func(*zap.Logger, string, []string) error { return nil },
 		ConfigureProvisionedRegistryEnv: func(*ExternalRegistryConfig, string) error { return nil },
 		RestartDeployment:               func(string, string) error { return nil },
 		CheckCRDInstalled:               func(string) error { return nil },
@@ -432,7 +459,7 @@ func TestSetupPlatformWithDeps_DiagnosticsOnOperatorWaitFailure(t *testing.T) {
 		PushOperatorImageToInternal: func(*zap.Logger, string, string, string) error {
 			return nil
 		},
-		DeployOperatorManifests:         func(*zap.Logger, string) error { return nil },
+		DeployOperatorManifests:         func(*zap.Logger, string, []string) error { return nil },
 		ConfigureProvisionedRegistryEnv: func(*ExternalRegistryConfig, string) error { return nil },
 		RestartDeployment:               func(string, string) error { return nil },
 		CheckCRDInstalled:               func(string) error { return nil },
@@ -487,7 +514,7 @@ func TestSetupPlatformWithDeps_CRDCheckFailure(t *testing.T) {
 		PushOperatorImageToInternal: func(*zap.Logger, string, string, string) error {
 			return nil
 		},
-		DeployOperatorManifests:         func(*zap.Logger, string) error { return nil },
+		DeployOperatorManifests:         func(*zap.Logger, string, []string) error { return nil },
 		ConfigureProvisionedRegistryEnv: func(*ExternalRegistryConfig, string) error { return nil },
 		RestartDeployment:               func(string, string) error { return nil },
 		CheckCRDInstalled: func(string) error {
@@ -545,7 +572,7 @@ func TestSetupPlatformWithDeps_InternalRegistryPushFailure(t *testing.T) {
 			rec.add("push-internal")
 			return fmt.Errorf("push failed")
 		},
-		DeployOperatorManifests:         func(*zap.Logger, string) error { rec.add("deploy-operator"); return nil },
+		DeployOperatorManifests:         func(*zap.Logger, string, []string) error { rec.add("deploy-operator"); return nil },
 		ConfigureProvisionedRegistryEnv: func(*ExternalRegistryConfig, string) error { return nil },
 		RestartDeployment:               func(string, string) error { return nil },
 		CheckCRDInstalled:               func(string) error { return nil },

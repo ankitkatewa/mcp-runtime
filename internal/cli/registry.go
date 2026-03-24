@@ -257,11 +257,24 @@ func saveExternalRegistryConfig(cfg *ExternalRegistryConfig) error {
 	if err := os.MkdirAll(filepath.Dir(path), 0o750); err != nil {
 		return err
 	}
-	data, err := yaml.Marshal(cfg)
+	data, err := marshalExternalRegistryConfig(cfg)
 	if err != nil {
 		return err
 	}
 	return os.WriteFile(path, data, 0o600)
+}
+
+func marshalExternalRegistryConfig(cfg *ExternalRegistryConfig) ([]byte, error) {
+	data := map[string]string{
+		"url": cfg.URL,
+	}
+	if cfg.Username != "" {
+		data["username"] = cfg.Username
+	}
+	if cfg.Password != "" {
+		data["password"] = cfg.Password
+	}
+	return yaml.Marshal(data)
 }
 
 func loadExternalRegistryConfig() (*ExternalRegistryConfig, error) {

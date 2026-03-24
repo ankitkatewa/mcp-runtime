@@ -72,6 +72,47 @@ func TestGetOperatorImage(t *testing.T) {
 	})
 }
 
+func TestBuildOperatorArgs(t *testing.T) {
+	t.Run("omits defaults", func(t *testing.T) {
+		if got := buildOperatorArgs("", "", false, false); len(got) != 0 {
+			t.Fatalf("expected no operator args, got %v", got)
+		}
+	})
+
+	t.Run("includes explicit overrides", func(t *testing.T) {
+		got := buildOperatorArgs(":9090", ":9091", false, true)
+		want := []string{
+			"--metrics-bind-address=:9090",
+			"--health-probe-bind-address=:9091",
+			"--leader-elect=false",
+		}
+		if len(got) != len(want) {
+			t.Fatalf("expected %d args, got %d (%v)", len(want), len(got), got)
+		}
+		for i := range want {
+			if got[i] != want[i] {
+				t.Fatalf("expected arg %d to be %q, got %q", i, want[i], got[i])
+			}
+		}
+	})
+}
+
+func TestMergeOperatorArgs(t *testing.T) {
+	existing := []string{"--leader-elect", "--metrics-bind-address=:8080"}
+	overrides := []string{"--metrics-bind-address=:9090", "--health-probe-bind-address=:9091", "--leader-elect=false"}
+
+	got := mergeOperatorArgs(existing, overrides)
+	want := []string{"--leader-elect=false", "--metrics-bind-address=:9090", "--health-probe-bind-address=:9091"}
+	if len(got) != len(want) {
+		t.Fatalf("expected %d merged args, got %d (%v)", len(want), len(got), got)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Fatalf("expected merged arg %d to be %q, got %q", i, want[i], got[i])
+		}
+	}
+}
+
 func TestConfigureProvisionedRegistryEnv(t *testing.T) {
 	t.Run("returns nil when registry not set", func(t *testing.T) {
 		mock := &MockExecutor{}
@@ -487,7 +528,11 @@ func TestDeployOperatorManifestsWithKubectl(t *testing.T) {
 	kubectlClient = kubectl
 
 	operatorImage := "registry.example.com/mcp-runtime-operator:dev"
-	if err := deployOperatorManifestsWithKubectl(kubectl, zap.NewNop(), operatorImage); err != nil {
+	operatorArgs := []string{
+		"--metrics-bind-address=:9090",
+		"--health-probe-bind-address=:9091",
+	}
+	if err := deployOperatorManifestsWithKubectl(kubectl, zap.NewNop(), operatorImage, operatorArgs); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	if managerManifest == "" {
@@ -495,6 +540,15 @@ func TestDeployOperatorManifestsWithKubectl(t *testing.T) {
 	}
 	if !strings.Contains(managerManifest, "image: "+operatorImage) {
 		t.Fatalf("expected manager manifest to include image %q", operatorImage)
+	}
+	if !strings.Contains(managerManifest, "- --leader-elect") {
+		t.Fatalf("expected manager manifest to preserve leader election flag, got:\n%s", managerManifest)
+	}
+	if !strings.Contains(managerManifest, "- --metrics-bind-address=:9090") {
+		t.Fatalf("expected manager manifest to include custom metrics arg, got:\n%s", managerManifest)
+	}
+	if !strings.Contains(managerManifest, "- --health-probe-bind-address=:9091") {
+		t.Fatalf("expected manager manifest to include custom probe arg, got:\n%s", managerManifest)
 	}
 
 	var (
@@ -542,7 +596,7 @@ func TestDeployOperatorManifestsWithKubectlCRDError(t *testing.T) {
 	}
 	kubectl := &KubectlClient{exec: mock, validators: nil}
 
-	if err := deployOperatorManifestsWithKubectl(kubectl, zap.NewNop(), "example"); err == nil {
+	if err := deployOperatorManifestsWithKubectl(kubectl, zap.NewNop(), "example", nil); err == nil {
 		t.Fatal("expected error")
 	}
 }
@@ -564,7 +618,7 @@ func TestDeployOperatorManifestsWithKubectlRBACError(t *testing.T) {
 	kubectl := &KubectlClient{exec: mock, validators: nil}
 	kubectlClient = kubectl
 
-	if err := deployOperatorManifestsWithKubectl(kubectl, zap.NewNop(), "example"); err == nil {
+	if err := deployOperatorManifestsWithKubectl(kubectl, zap.NewNop(), "example", nil); err == nil {
 		t.Fatal("expected error")
 	}
 }
@@ -601,7 +655,7 @@ func TestDeployOperatorManifestsWithKubectlManagerApplyError(t *testing.T) {
 	kubectl := &KubectlClient{exec: mock, validators: nil}
 	kubectlClient = kubectl
 
-	if err := deployOperatorManifestsWithKubectl(kubectl, zap.NewNop(), "example"); err == nil {
+	if err := deployOperatorManifestsWithKubectl(kubectl, zap.NewNop(), "example", nil); err == nil {
 		t.Fatal("expected error")
 	}
 }
