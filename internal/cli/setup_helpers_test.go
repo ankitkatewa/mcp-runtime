@@ -72,6 +72,52 @@ func TestGetOperatorImage(t *testing.T) {
 	})
 }
 
+func TestGetGatewayProxyImage(t *testing.T) {
+	origOverride := DefaultCLIConfig.GatewayProxyImage
+	origKubectl := kubectlClient
+	t.Cleanup(func() {
+		DefaultCLIConfig.GatewayProxyImage = origOverride
+		kubectlClient = origKubectl
+	})
+
+	t.Run("uses override when set", func(t *testing.T) {
+		DefaultCLIConfig.GatewayProxyImage = "override/mcp-proxy:v1"
+		got := getGatewayProxyImage(nil)
+		if got != "override/mcp-proxy:v1" {
+			t.Fatalf("expected override image, got %q", got)
+		}
+	})
+
+	t.Run("uses external registry URL", func(t *testing.T) {
+		DefaultCLIConfig.GatewayProxyImage = ""
+		ext := &ExternalRegistryConfig{URL: "registry.example.com/"}
+		got := getGatewayProxyImage(ext)
+		if got != "registry.example.com/mcp-sentinel-mcp-proxy:latest" {
+			t.Fatalf("unexpected external registry image: %q", got)
+		}
+	})
+
+	t.Run("uses platform registry URL when external not set", func(t *testing.T) {
+		DefaultCLIConfig.GatewayProxyImage = ""
+		mock := &MockExecutor{
+			CommandFunc: func(spec ExecSpec) *MockCommand {
+				if contains(spec.Args, "jsonpath={.spec.clusterIP}") {
+					return &MockCommand{OutputData: []byte("10.0.0.1")}
+				}
+				if contains(spec.Args, "jsonpath={.spec.ports[0].port}") {
+					return &MockCommand{OutputData: []byte("5000")}
+				}
+				return &MockCommand{}
+			},
+		}
+		kubectlClient = &KubectlClient{exec: mock, validators: nil}
+		got := getGatewayProxyImage(nil)
+		if got != "10.0.0.1:5000/mcp-sentinel-mcp-proxy:latest" {
+			t.Fatalf("unexpected platform registry image: %q", got)
+		}
+	})
+}
+
 func TestBuildOperatorArgs(t *testing.T) {
 	t.Run("omits defaults", func(t *testing.T) {
 		if got := buildOperatorArgs("", "", false, false); len(got) != 0 {
@@ -110,6 +156,119 @@ func TestMergeOperatorArgs(t *testing.T) {
 		if got[i] != want[i] {
 			t.Fatalf("expected merged arg %d to be %q, got %q", i, want[i], got[i])
 		}
+	}
+}
+
+func TestOperatorEnvOverrides(t *testing.T) {
+	orig := DefaultCLIConfig
+	t.Cleanup(func() {
+		DefaultCLIConfig = orig
+	})
+
+	t.Run("returns empty when no gateway override is set", func(t *testing.T) {
+		DefaultCLIConfig = &CLIConfig{}
+		got := operatorEnvOverrides("")
+		if len(got) != 1 {
+			t.Fatalf("expected default analytics ingest env only, got %v", got)
+		}
+		if got[0].Name != "MCP_SENTINEL_INGEST_URL" || got[0].Value != defaultAnalyticsIngestURL {
+			t.Fatalf("unexpected default env override: %+v", got[0])
+		}
+	})
+
+	t.Run("returns gateway proxy image override", func(t *testing.T) {
+		DefaultCLIConfig = &CLIConfig{GatewayProxyImage: "example.com/mcp-proxy:latest"}
+		got := operatorEnvOverrides("")
+		if len(got) != 2 {
+			t.Fatalf("expected gateway and analytics env overrides, got %d (%v)", len(got), got)
+		}
+		if got[0].Name != "MCP_GATEWAY_PROXY_IMAGE" || got[0].Value != "example.com/mcp-proxy:latest" {
+			t.Fatalf("unexpected env override: %+v", got[0])
+		}
+		if got[1].Name != "MCP_SENTINEL_INGEST_URL" || got[1].Value != defaultAnalyticsIngestURL {
+			t.Fatalf("unexpected analytics env override: %+v", got[1])
+		}
+	})
+
+	t.Run("prefers explicit setup image over config override", func(t *testing.T) {
+		DefaultCLIConfig = &CLIConfig{
+			GatewayProxyImage:  "example.com/mcp-proxy:config",
+			AnalyticsIngestURL: "http://custom-analytics-ingest",
+		}
+		got := operatorEnvOverrides("example.com/mcp-proxy:setup")
+		if len(got) != 2 {
+			t.Fatalf("expected gateway and analytics env overrides, got %d (%v)", len(got), got)
+		}
+		if got[0].Value != "example.com/mcp-proxy:setup" {
+			t.Fatalf("expected explicit setup image to win, got %+v", got[0])
+		}
+		if got[1].Name != "MCP_SENTINEL_INGEST_URL" || got[1].Value != "http://custom-analytics-ingest" {
+			t.Fatalf("expected custom analytics env override, got %+v", got[1])
+		}
+	})
+
+	t.Run("uses analytics ingest override when configured", func(t *testing.T) {
+		DefaultCLIConfig = &CLIConfig{AnalyticsIngestURL: "http://custom-analytics-ingest"}
+		got := operatorEnvOverrides("")
+		if len(got) != 1 {
+			t.Fatalf("expected analytics ingest env only, got %d (%v)", len(got), got)
+		}
+		if got[0].Value != "http://custom-analytics-ingest" {
+			t.Fatalf("expected custom ingest url, got %+v", got[0])
+		}
+	})
+}
+
+func TestInjectOperatorEnvVars(t *testing.T) {
+	t.Run("injects env block after manager image", func(t *testing.T) {
+		input := strings.Join([]string{
+			"containers:",
+			"- name: manager",
+			"  image: example.com/mcp-runtime-operator:latest",
+			"  imagePullPolicy: IfNotPresent",
+			"",
+		}, "\n")
+
+		got := injectOperatorEnvVars(input, []operatorEnvVar{
+			{Name: "MCP_GATEWAY_PROXY_IMAGE", Value: "example.com/mcp-proxy:latest"},
+		})
+
+		wantSnippet := strings.Join([]string{
+			"  image: example.com/mcp-runtime-operator:latest",
+			"  env:",
+			"  - name: MCP_GATEWAY_PROXY_IMAGE",
+			"    value: example.com/mcp-proxy:latest",
+			"  imagePullPolicy: IfNotPresent",
+		}, "\n")
+		if !strings.Contains(got, wantSnippet) {
+			t.Fatalf("expected injected env block, got:\n%s", got)
+		}
+	})
+
+	t.Run("returns original yaml when no env vars are provided", func(t *testing.T) {
+		input := "image: example.com/mcp-runtime-operator:latest\n"
+		if got := injectOperatorEnvVars(input, nil); got != input {
+			t.Fatalf("expected original yaml, got:\n%s", got)
+		}
+	})
+}
+
+func TestRenderOperatorEnvBlock(t *testing.T) {
+	got := renderOperatorEnvBlock("  ", []operatorEnvVar{
+		{Name: "MCP_GATEWAY_PROXY_IMAGE", Value: "example.com/mcp-proxy:latest"},
+		{Name: "FOO", Value: "bar"},
+	})
+
+	want := strings.Join([]string{
+		"  env:",
+		"  - name: MCP_GATEWAY_PROXY_IMAGE",
+		"    value: example.com/mcp-proxy:latest",
+		"  - name: FOO",
+		"    value: bar",
+		"",
+	}, "\n")
+	if got != want {
+		t.Fatalf("unexpected env block:\n%s", got)
 	}
 }
 
@@ -323,6 +482,184 @@ func TestEnsureImagePullSecret(t *testing.T) {
 	})
 }
 
+func TestEnsureAnalyticsImagePullSecret(t *testing.T) {
+	orig := DefaultCLIConfig
+	t.Cleanup(func() {
+		DefaultCLIConfig = orig
+	})
+
+	DefaultCLIConfig = &CLIConfig{
+		ProvisionedRegistryURL:      "registry.example.com",
+		ProvisionedRegistryUsername: "user",
+		ProvisionedRegistryPassword: "pass",
+	}
+
+	var manifest string
+	mock := &MockExecutor{
+		CommandFunc: func(spec ExecSpec) *MockCommand {
+			cmd := &MockCommand{Args: spec.Args}
+			if contains(spec.Args, "apply") && contains(spec.Args, "-f") && contains(spec.Args, "-") {
+				cmd.RunFunc = func() error {
+					if cmd.StdinR != nil {
+						data, _ := io.ReadAll(cmd.StdinR)
+						manifest = string(data)
+					}
+					return nil
+				}
+			}
+			return cmd
+		},
+	}
+	kubectl := &KubectlClient{exec: mock, validators: nil}
+
+	secretName, err := ensureAnalyticsImagePullSecret(kubectl)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if secretName != defaultRegistrySecretName {
+		t.Fatalf("expected secret name %q, got %q", defaultRegistrySecretName, secretName)
+	}
+	if !strings.Contains(manifest, "namespace: "+defaultAnalyticsNamespace) {
+		t.Fatalf("expected analytics namespace in secret manifest, got %q", manifest)
+	}
+	if !strings.Contains(manifest, "kubernetes.io/dockerconfigjson") {
+		t.Fatalf("expected dockerconfigjson secret manifest, got %q", manifest)
+	}
+}
+
+func TestRenderAnalyticsSecretManifestReusesExistingPassword(t *testing.T) {
+	encoded := base64.StdEncoding.EncodeToString([]byte("keep-me"))
+	mock := &MockExecutor{
+		CommandFunc: func(spec ExecSpec) *MockCommand {
+			if contains(spec.Args, "get") && contains(spec.Args, "secret") {
+				return &MockCommand{Args: spec.Args, OutputData: []byte(encoded)}
+			}
+			return &MockCommand{Args: spec.Args}
+		},
+	}
+	kubectl := &KubectlClient{exec: mock, validators: nil}
+
+	manifest, err := renderAnalyticsSecretManifest(kubectl)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !strings.Contains(manifest, `GRAFANA_ADMIN_PASSWORD: "keep-me"`) {
+		t.Fatalf("expected existing grafana password to be reused, got %q", manifest)
+	}
+}
+
+func TestRenderAnalyticsManifestInjectsImagePullSecrets(t *testing.T) {
+	content := `apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: mcp-sentinel-ingest
+spec:
+  template:
+    spec:
+      containers:
+        - name: ingest
+          image: mcp-sentinel-ingest:latest
+---
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  name: promtail
+spec:
+  template:
+    spec:
+      containers:
+        - name: promtail
+          image: grafana/promtail:2.9.4
+`
+
+	rendered, err := renderAnalyticsManifest(content, AnalyticsImageSet{Ingest: "registry.example.com/mcp-sentinel-ingest:latest"}, defaultRegistrySecretName)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !strings.Contains(rendered, "image: registry.example.com/mcp-sentinel-ingest:latest") {
+		t.Fatalf("expected image replacement, got %s", rendered)
+	}
+	if !strings.Contains(rendered, "imagePullSecrets:") || !strings.Contains(rendered, "name: "+defaultRegistrySecretName) {
+		t.Fatalf("expected injected imagePullSecrets, got %s", rendered)
+	}
+}
+
+func TestDeployAnalyticsManifestsReturnsRolloutFailures(t *testing.T) {
+	orig := DefaultCLIConfig
+	t.Cleanup(func() {
+		DefaultCLIConfig = orig
+	})
+	DefaultCLIConfig = &CLIConfig{}
+
+	cwd, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("failed to get working directory: %v", err)
+	}
+	root := t.TempDir()
+	manifestDir := filepath.Join(root, "mcp-sentinel", "k8s")
+	if err := os.MkdirAll(manifestDir, 0o755); err != nil {
+		t.Fatalf("failed to create manifest dir: %v", err)
+	}
+	manifestContent := "apiVersion: v1\nkind: ConfigMap\nmetadata:\n  name: fixture\n  namespace: mcp-sentinel\n"
+	for _, name := range []string{
+		"00-namespace.yaml",
+		"01-config.yaml",
+		"03-clickhouse.yaml",
+		"04-clickhouse-init.yaml",
+		"05-kafka.yaml",
+		"06-ingest.yaml",
+		"07-processor.yaml",
+		"08-api.yaml",
+		"09-ui.yaml",
+		"10-gateway.yaml",
+		"11-prometheus.yaml",
+		"12-grafana.yaml",
+		"15-otel-collector.yaml",
+		"16-tempo.yaml",
+		"17-loki.yaml",
+		"18-promtail.yaml",
+		"19-grafana-datasources.yaml",
+	} {
+		if err := os.WriteFile(filepath.Join(manifestDir, name), []byte(manifestContent), 0o644); err != nil {
+			t.Fatalf("failed to write fixture manifest %s: %v", name, err)
+		}
+	}
+	if err := os.Chdir(root); err != nil {
+		t.Fatalf("failed to chdir to fixture root: %v", err)
+	}
+	t.Cleanup(func() {
+		_ = os.Chdir(cwd)
+	})
+
+	mock := &MockExecutor{
+		CommandFunc: func(spec ExecSpec) *MockCommand {
+			cmd := &MockCommand{Args: spec.Args}
+			switch {
+			case contains(spec.Args, "get") && contains(spec.Args, "secret"):
+				cmd.OutputData = []byte("Error from server (NotFound): secrets \"mcp-sentinel-secrets\" not found")
+				cmd.OutputErr = errors.New("not found")
+			case contains(spec.Args, "rollout") && contains(spec.Args, "deployment/mcp-sentinel-api"):
+				cmd.RunErr = errors.New("image pull failed")
+			}
+			return cmd
+		},
+	}
+	kubectl := &KubectlClient{exec: mock, validators: nil}
+
+	err = deployAnalyticsManifestsWithKubectl(kubectl, zap.NewNop(), AnalyticsImageSet{
+		Ingest:    "example.com/mcp-sentinel-ingest:latest",
+		API:       "example.com/mcp-sentinel-api:latest",
+		Processor: "example.com/mcp-sentinel-processor:latest",
+		UI:        "example.com/mcp-sentinel-ui:latest",
+	})
+	if err == nil {
+		t.Fatal("expected rollout failure")
+	}
+	if !strings.Contains(err.Error(), "deployment/mcp-sentinel-api") {
+		t.Fatalf("expected failing workload in error, got %v", err)
+	}
+}
+
 func TestSetupDepsWithDefaultsSetsNil(t *testing.T) {
 	deps := SetupDeps{}.withDefaults(zap.NewNop())
 	if deps.ResolveExternalRegistryConfig == nil {
@@ -355,6 +692,12 @@ func TestSetupDepsWithDefaultsSetsNil(t *testing.T) {
 	if deps.PushOperatorImage == nil {
 		t.Fatal("expected PushOperatorImage default")
 	}
+	if deps.BuildGatewayProxyImage == nil {
+		t.Fatal("expected BuildGatewayProxyImage default")
+	}
+	if deps.PushGatewayProxyImage == nil {
+		t.Fatal("expected PushGatewayProxyImage default")
+	}
 	if deps.EnsureNamespace == nil {
 		t.Fatal("expected EnsureNamespace default")
 	}
@@ -363,6 +706,9 @@ func TestSetupDepsWithDefaultsSetsNil(t *testing.T) {
 	}
 	if deps.PushOperatorImageToInternal == nil {
 		t.Fatal("expected PushOperatorImageToInternal default")
+	}
+	if deps.PushGatewayProxyImageToInternal == nil {
+		t.Fatal("expected PushGatewayProxyImageToInternal default")
 	}
 	if deps.DeployOperatorManifests == nil {
 		t.Fatal("expected DeployOperatorManifests default")
@@ -385,6 +731,9 @@ func TestSetupDepsWithDefaultsSetsNil(t *testing.T) {
 	if deps.OperatorImageFor == nil {
 		t.Fatal("expected OperatorImageFor default")
 	}
+	if deps.GatewayProxyImageFor == nil {
+		t.Fatal("expected GatewayProxyImageFor default")
+	}
 }
 
 func TestSetupDepsWithDefaultsPreservesNonNil(t *testing.T) {
@@ -396,6 +745,9 @@ func TestSetupDepsWithDefaultsPreservesNonNil(t *testing.T) {
 		GetRegistryPort: func() int { return 123 },
 		OperatorImageFor: func(_ *ExternalRegistryConfig) string {
 			return "custom-image"
+		},
+		GatewayProxyImageFor: func(_ *ExternalRegistryConfig) string {
+			return "custom-gateway-image"
 		},
 	}
 
@@ -411,6 +763,9 @@ func TestSetupDepsWithDefaultsPreservesNonNil(t *testing.T) {
 	}
 	if got.OperatorImageFor(nil) != "custom-image" {
 		t.Fatal("expected OperatorImageFor to be preserved")
+	}
+	if got.GatewayProxyImageFor(nil) != "custom-gateway-image" {
+		t.Fatal("expected GatewayProxyImageFor to be preserved")
 	}
 }
 
@@ -528,11 +883,12 @@ func TestDeployOperatorManifestsWithKubectl(t *testing.T) {
 	kubectlClient = kubectl
 
 	operatorImage := "registry.example.com/mcp-runtime-operator:dev"
+	gatewayProxyImage := "registry.example.com/mcp-sentinel-mcp-proxy:dev"
 	operatorArgs := []string{
 		"--metrics-bind-address=:9090",
 		"--health-probe-bind-address=:9091",
 	}
-	if err := deployOperatorManifestsWithKubectl(kubectl, zap.NewNop(), operatorImage, operatorArgs); err != nil {
+	if err := deployOperatorManifestsWithKubectl(kubectl, zap.NewNop(), operatorImage, gatewayProxyImage, operatorArgs); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	if managerManifest == "" {
@@ -550,6 +906,12 @@ func TestDeployOperatorManifestsWithKubectl(t *testing.T) {
 	if !strings.Contains(managerManifest, "- --health-probe-bind-address=:9091") {
 		t.Fatalf("expected manager manifest to include custom probe arg, got:\n%s", managerManifest)
 	}
+	if !strings.Contains(managerManifest, "name: MCP_GATEWAY_PROXY_IMAGE") || !strings.Contains(managerManifest, "value: "+gatewayProxyImage) {
+		t.Fatalf("expected manager manifest to include gateway proxy image env, got:\n%s", managerManifest)
+	}
+	if !strings.Contains(managerManifest, "name: MCP_SENTINEL_INGEST_URL") || !strings.Contains(managerManifest, "value: "+defaultAnalyticsIngestURL) {
+		t.Fatalf("expected manager manifest to include analytics ingest env, got:\n%s", managerManifest)
+	}
 
 	var (
 		hasCRD          bool
@@ -559,7 +921,7 @@ func TestDeployOperatorManifestsWithKubectl(t *testing.T) {
 		hasNamespace    bool
 	)
 	for _, cmd := range mock.Commands {
-		if commandHasArgs(cmd, "apply", "--validate=false", "-f", "config/crd/bases/mcpruntime.org_mcpservers.yaml") {
+		if commandHasArgs(cmd, "apply", "--validate=false", "-f", "config/crd/bases") {
 			hasCRD = true
 		}
 		if commandHasArgs(cmd, "apply", "-k", "config/rbac/") {
@@ -588,7 +950,7 @@ func TestDeployOperatorManifestsWithKubectlCRDError(t *testing.T) {
 	mock := &MockExecutor{
 		CommandFunc: func(spec ExecSpec) *MockCommand {
 			cmd := &MockCommand{Args: spec.Args}
-			if commandHasArgs(spec, "apply", "--validate=false", "-f", "config/crd/bases/mcpruntime.org_mcpservers.yaml") {
+			if commandHasArgs(spec, "apply", "--validate=false", "-f", "config/crd/bases") {
 				cmd.RunErr = mockErr
 			}
 			return cmd
@@ -596,7 +958,7 @@ func TestDeployOperatorManifestsWithKubectlCRDError(t *testing.T) {
 	}
 	kubectl := &KubectlClient{exec: mock, validators: nil}
 
-	if err := deployOperatorManifestsWithKubectl(kubectl, zap.NewNop(), "example", nil); err == nil {
+	if err := deployOperatorManifestsWithKubectl(kubectl, zap.NewNop(), "example", "", nil); err == nil {
 		t.Fatal("expected error")
 	}
 }
@@ -618,7 +980,7 @@ func TestDeployOperatorManifestsWithKubectlRBACError(t *testing.T) {
 	kubectl := &KubectlClient{exec: mock, validators: nil}
 	kubectlClient = kubectl
 
-	if err := deployOperatorManifestsWithKubectl(kubectl, zap.NewNop(), "example", nil); err == nil {
+	if err := deployOperatorManifestsWithKubectl(kubectl, zap.NewNop(), "example", "", nil); err == nil {
 		t.Fatal("expected error")
 	}
 }
@@ -655,7 +1017,7 @@ func TestDeployOperatorManifestsWithKubectlManagerApplyError(t *testing.T) {
 	kubectl := &KubectlClient{exec: mock, validators: nil}
 	kubectlClient = kubectl
 
-	if err := deployOperatorManifestsWithKubectl(kubectl, zap.NewNop(), "example", nil); err == nil {
+	if err := deployOperatorManifestsWithKubectl(kubectl, zap.NewNop(), "example", "", nil); err == nil {
 		t.Fatal("expected error")
 	}
 }

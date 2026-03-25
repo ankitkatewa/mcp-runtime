@@ -183,3 +183,55 @@ func TestGetEnvIntOrDefault(t *testing.T) {
 		})
 	}
 }
+
+func TestLoadOperatorConfig(t *testing.T) {
+	t.Setenv("MCP_CLUSTER_NAME", "prod-cluster")
+	t.Setenv("DEFAULT_INGRESS_HOST", "mcp.example.com")
+	t.Setenv("DEFAULT_INGRESS_CLASS", "nginx")
+	t.Setenv("PROVISIONED_REGISTRY_URL", "registry.example.com:5000")
+	t.Setenv("PROVISIONED_REGISTRY_USERNAME", "user")
+	t.Setenv("PROVISIONED_REGISTRY_PASSWORD", "pass")
+	t.Setenv("PROVISIONED_REGISTRY_SECRET_NAME", "registry-creds")
+	t.Setenv("REQUEUE_DELAY_SECONDS", "45")
+	t.Setenv("MCP_GATEWAY_PROXY_IMAGE", "example.com/mcp-proxy:latest")
+	t.Setenv("MCP_SENTINEL_INGEST_URL", "http://mcp-sentinel-ingest.mcp-sentinel.svc.cluster.local:8081/events")
+
+	cfg := LoadOperatorConfig()
+	if cfg.DefaultIngressHost != "mcp.example.com" {
+		t.Fatalf("expected ingress host override, got %q", cfg.DefaultIngressHost)
+	}
+	if cfg.DefaultIngressClass != "nginx" {
+		t.Fatalf("expected ingress class override, got %q", cfg.DefaultIngressClass)
+	}
+	if cfg.ProvisionedRegistryURL != "registry.example.com:5000" {
+		t.Fatalf("expected registry url override, got %q", cfg.ProvisionedRegistryURL)
+	}
+	if cfg.ProvisionedRegistryUsername != "user" || cfg.ProvisionedRegistryPassword != "pass" {
+		t.Fatalf("expected registry credentials, got %q/%q", cfg.ProvisionedRegistryUsername, cfg.ProvisionedRegistryPassword)
+	}
+	if cfg.ProvisionedRegistrySecretName != "registry-creds" {
+		t.Fatalf("expected registry secret override, got %q", cfg.ProvisionedRegistrySecretName)
+	}
+	if cfg.RequeueDelaySeconds != 45 {
+		t.Fatalf("expected requeue delay override, got %d", cfg.RequeueDelaySeconds)
+	}
+	if cfg.GatewayProxyImage != "example.com/mcp-proxy:latest" {
+		t.Fatalf("expected gateway proxy image override, got %q", cfg.GatewayProxyImage)
+	}
+	if cfg.AnalyticsIngestURL != "http://mcp-sentinel-ingest.mcp-sentinel.svc.cluster.local:8081/events" {
+		t.Fatalf("expected analytics ingest url override, got %q", cfg.AnalyticsIngestURL)
+	}
+	if cfg.ClusterName != "prod-cluster" {
+		t.Fatalf("expected cluster name override, got %q", cfg.ClusterName)
+	}
+}
+
+func TestLoadOperatorConfigUsesLegacyAnalyticsEnv(t *testing.T) {
+	t.Setenv("MCP_SENTINEL_INGEST_URL", "")
+	t.Setenv("MCP_ANALYTICS_INGEST_URL", "http://legacy-ingest")
+
+	cfg := LoadOperatorConfig()
+	if cfg.AnalyticsIngestURL != "http://legacy-ingest" {
+		t.Fatalf("expected legacy analytics ingest url override, got %q", cfg.AnalyticsIngestURL)
+	}
+}

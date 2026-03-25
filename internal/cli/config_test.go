@@ -52,6 +52,8 @@ func TestLoadCLIConfigWithProvisionedRegistry(t *testing.T) {
 	t.Setenv("MCP_REGISTRY_PORT", "6000")
 	t.Setenv("MCP_SKOPEO_IMAGE", "example/skopeo:latest")
 	t.Setenv("MCP_OPERATOR_IMAGE", "example/operator:latest")
+	t.Setenv("MCP_GATEWAY_PROXY_IMAGE", "example/mcp-proxy:latest")
+	t.Setenv("MCP_SENTINEL_INGEST_URL", "http://mcp-sentinel-ingest.mcp-sentinel.svc.cluster.local:8081/events")
 	t.Setenv("MCP_DEFAULT_SERVER_PORT", "9000")
 	t.Setenv("PROVISIONED_REGISTRY_URL", "registry.example.com")
 	t.Setenv("PROVISIONED_REGISTRY_USERNAME", "user")
@@ -73,6 +75,12 @@ func TestLoadCLIConfigWithProvisionedRegistry(t *testing.T) {
 	if cfg.OperatorImage != "example/operator:latest" {
 		t.Fatalf("expected operator image override, got %q", cfg.OperatorImage)
 	}
+	if cfg.GatewayProxyImage != "example/mcp-proxy:latest" {
+		t.Fatalf("expected gateway proxy image override, got %q", cfg.GatewayProxyImage)
+	}
+	if cfg.AnalyticsIngestURL != "http://mcp-sentinel-ingest.mcp-sentinel.svc.cluster.local:8081/events" {
+		t.Fatalf("expected analytics ingest url override, got %q", cfg.AnalyticsIngestURL)
+	}
 	if cfg.DefaultServerPort != 9000 {
 		t.Fatalf("expected default server port 9000, got %d", cfg.DefaultServerPort)
 	}
@@ -84,17 +92,29 @@ func TestLoadCLIConfigWithProvisionedRegistry(t *testing.T) {
 	}
 }
 
+func TestLoadCLIConfigUsesLegacyAnalyticsEnv(t *testing.T) {
+	t.Setenv("MCP_SENTINEL_INGEST_URL", "")
+	t.Setenv("MCP_ANALYTICS_INGEST_URL", "http://legacy-ingest")
+
+	cfg := LoadCLIConfig()
+	if cfg.AnalyticsIngestURL != "http://legacy-ingest" {
+		t.Fatalf("expected legacy analytics ingest url override, got %q", cfg.AnalyticsIngestURL)
+	}
+}
+
 func TestConfigAccessors(t *testing.T) {
 	orig := DefaultCLIConfig
 	t.Cleanup(func() { DefaultCLIConfig = orig })
 
 	DefaultCLIConfig = &CLIConfig{
-		DeploymentTimeout: 10 * time.Second,
-		CertTimeout:       15 * time.Second,
-		RegistryPort:      7000,
-		SkopeoImage:       "skopeo:test",
-		OperatorImage:     "operator:test",
-		DefaultServerPort: 7070,
+		DeploymentTimeout:  10 * time.Second,
+		CertTimeout:        15 * time.Second,
+		RegistryPort:       7000,
+		SkopeoImage:        "skopeo:test",
+		OperatorImage:      "operator:test",
+		GatewayProxyImage:  "proxy:test",
+		AnalyticsIngestURL: "http://analytics-ingest",
+		DefaultServerPort:  7070,
 	}
 
 	if GetDeploymentTimeout() != 10*time.Second {
@@ -111,6 +131,12 @@ func TestConfigAccessors(t *testing.T) {
 	}
 	if GetOperatorImageOverride() != "operator:test" {
 		t.Fatalf("GetOperatorImageOverride mismatch")
+	}
+	if GetGatewayProxyImageOverride() != "proxy:test" {
+		t.Fatalf("GetGatewayProxyImageOverride mismatch")
+	}
+	if GetAnalyticsIngestURLOverride() != "http://analytics-ingest" {
+		t.Fatalf("GetAnalyticsIngestURLOverride mismatch")
 	}
 	if GetDefaultServerPort() != 7070 {
 		t.Fatalf("GetDefaultServerPort mismatch")

@@ -7,6 +7,17 @@ rules:
 - apiGroups:
   - ""
   resources:
+  - configmaps
+  verbs:
+  - create
+  - delete
+  - get
+  - list
+  - update
+  - watch
+- apiGroups:
+  - ""
+  resources:
   - events
   verbs:
   - create
@@ -62,6 +73,22 @@ rules:
 - apiGroups:
   - mcpruntime.org
   resources:
+  - mcpaccessgrants
+  verbs:
+  - get
+  - list
+  - watch
+- apiGroups:
+  - mcpruntime.org
+  resources:
+  - mcpagentsessions
+  verbs:
+  - get
+  - list
+  - watch
+- apiGroups:
+  - mcpruntime.org
+  resources:
   - mcpservers
   verbs:
   - create
@@ -85,6 +112,14 @@ rules:
   - get
   - patch
   - update
+- apiGroups:
+  - networking.k8s.io
+  resources:
+  - ingressclasses
+  verbs:
+  - get
+  - list
+  - watch
 - apiGroups:
   - networking.k8s.io
   resources:

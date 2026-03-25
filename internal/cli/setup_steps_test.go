@@ -74,6 +74,34 @@ func TestBuildSetupStepsOrderWithoutTLS(t *testing.T) {
 	}
 }
 
+func TestBuildSetupStepsOrderWithAnalytics(t *testing.T) {
+	ctx := &SetupContext{
+		Plan: SetupPlan{
+			DeployAnalytics: true,
+		},
+	}
+	steps := buildSetupSteps(ctx)
+	if len(steps) != 7 {
+		t.Fatalf("expected 7 steps, got %d", len(steps))
+	}
+
+	got := []string{
+		steps[0].Name(),
+		steps[1].Name(),
+		steps[2].Name(),
+		steps[3].Name(),
+		steps[4].Name(),
+		steps[5].Name(),
+		steps[6].Name(),
+	}
+	want := []string{"cluster", "registry", "operator-image", "analytics-images", "operator-deploy", "analytics-deploy", "verify"}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Fatalf("step %d: expected %q, got %q", i, want[i], got[i])
+		}
+	}
+}
+
 func TestOperatorImageStepSetsContext(t *testing.T) {
 	ctx := &SetupContext{
 		Plan: SetupPlan{},
@@ -86,8 +114,13 @@ func TestOperatorImageStepSetsContext(t *testing.T) {
 		OperatorImageFor: func(_ *ExternalRegistryConfig) string {
 			return "registry.example.com/mcp-runtime-operator:latest"
 		},
-		BuildOperatorImage: func(string) error { return nil },
-		PushOperatorImage:  func(string) error { return nil },
+		GatewayProxyImageFor: func(_ *ExternalRegistryConfig) string {
+			return "registry.example.com/mcp-sentinel-mcp-proxy:latest"
+		},
+		BuildOperatorImage:     func(string) error { return nil },
+		PushOperatorImage:      func(string) error { return nil },
+		BuildGatewayProxyImage: func(string) error { return nil },
+		PushGatewayProxyImage:  func(string) error { return nil },
 	}
 
 	step := operatorImageStep{}
@@ -97,10 +130,14 @@ func TestOperatorImageStepSetsContext(t *testing.T) {
 	if ctx.OperatorImage != "registry.example.com/mcp-runtime-operator:latest" {
 		t.Fatalf("expected operator image to be set, got %q", ctx.OperatorImage)
 	}
+	if ctx.GatewayProxyImage != "registry.example.com/mcp-sentinel-mcp-proxy:latest" {
+		t.Fatalf("expected gateway proxy image to be set, got %q", ctx.GatewayProxyImage)
+	}
 }
 
 func TestOperatorImageStepTestModeSkipsBuildAndUsesPreloadedImage(t *testing.T) {
 	var buildCalls int32
+	var gatewayBuildCalls int32
 	ctx := &SetupContext{
 		Plan: SetupPlan{
 			TestMode: true,
@@ -109,9 +146,15 @@ func TestOperatorImageStepTestModeSkipsBuildAndUsesPreloadedImage(t *testing.T) 
 		UsingExternalRegistry: true,
 	}
 	deps := SetupDeps{
-		OperatorImageFor:   func(_ *ExternalRegistryConfig) string { return "registry.example.com/mcp-runtime-operator:latest" },
-		BuildOperatorImage: func(string) error { atomic.AddInt32(&buildCalls, 1); return nil },
-		PushOperatorImage:  func(string) error { t.Fatal("did not expect push in test mode"); return nil },
+		OperatorImageFor:     func(_ *ExternalRegistryConfig) string { return "registry.example.com/mcp-runtime-operator:latest" },
+		GatewayProxyImageFor: func(_ *ExternalRegistryConfig) string { return "registry.example.com/mcp-sentinel-mcp-proxy:latest" },
+		BuildOperatorImage:   func(string) error { atomic.AddInt32(&buildCalls, 1); return nil },
+		PushOperatorImage:    func(string) error { t.Fatal("did not expect operator push in test mode"); return nil },
+		BuildGatewayProxyImage: func(string) error {
+			atomic.AddInt32(&gatewayBuildCalls, 1)
+			return nil
+		},
+		PushGatewayProxyImage: func(string) error { t.Fatal("did not expect gateway push in test mode"); return nil },
 	}
 
 	step := operatorImageStep{}
@@ -121,8 +164,14 @@ func TestOperatorImageStepTestModeSkipsBuildAndUsesPreloadedImage(t *testing.T) 
 	if ctx.OperatorImage != testModeOperatorImage {
 		t.Fatalf("expected test mode image %q, got %q", testModeOperatorImage, ctx.OperatorImage)
 	}
+	if ctx.GatewayProxyImage != testModeGatewayProxyImage {
+		t.Fatalf("expected test mode gateway image %q, got %q", testModeGatewayProxyImage, ctx.GatewayProxyImage)
+	}
 	if atomic.LoadInt32(&buildCalls) != 0 {
 		t.Fatalf("expected build to be skipped in test mode, got %d calls", buildCalls)
+	}
+	if atomic.LoadInt32(&gatewayBuildCalls) != 0 {
+		t.Fatalf("expected gateway build to be skipped in test mode, got %d calls", gatewayBuildCalls)
 	}
 }
 
@@ -132,14 +181,17 @@ func TestDeployOperatorStepCmdPassesOperatorArgs(t *testing.T) {
 			OperatorArgs: []string{"--metrics-bind-address=:9090", "--leader-elect=false"},
 		},
 		OperatorImage:         "registry.example.com/mcp-runtime-operator:latest",
+		GatewayProxyImage:     "registry.example.com/mcp-sentinel-mcp-proxy:latest",
 		UsingExternalRegistry: false,
 	}
 	var gotArgs []string
+	var gotGatewayImage string
 	deps := SetupDeps{
-		DeployOperatorManifests: func(_ *zap.Logger, image string, args []string) error {
+		DeployOperatorManifests: func(_ *zap.Logger, image, gatewayImage string, args []string) error {
 			if image != ctx.OperatorImage {
 				t.Fatalf("expected operator image %q, got %q", ctx.OperatorImage, image)
 			}
+			gotGatewayImage = gatewayImage
 			gotArgs = append([]string(nil), args...)
 			return nil
 		},
@@ -157,6 +209,9 @@ func TestDeployOperatorStepCmdPassesOperatorArgs(t *testing.T) {
 		if gotArgs[i] != ctx.Plan.OperatorArgs[i] {
 			t.Fatalf("expected operator arg %d to be %q, got %q", i, ctx.Plan.OperatorArgs[i], gotArgs[i])
 		}
+	}
+	if gotGatewayImage != ctx.GatewayProxyImage {
+		t.Fatalf("expected gateway image %q, got %q", ctx.GatewayProxyImage, gotGatewayImage)
 	}
 }
 

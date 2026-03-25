@@ -5,6 +5,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"gopkg.in/yaml.v3"
 )
 
 func TestGenerateCRD(t *testing.T) {
@@ -114,6 +116,125 @@ func TestGenerateCRD(t *testing.T) {
 		assertContains(t, content, "value: postgres://localhost")
 		assertContains(t, content, "name: LOG_LEVEL")
 		assertContains(t, content, "value: debug")
+	})
+
+	t.Run("generates CRD with gateway and analytics", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		outputPath := filepath.Join(tmpDir, "gateway-server.yaml")
+
+		server := &ServerMetadata{
+			Name:      "gateway-server",
+			Image:     "my-image",
+			Namespace: "default",
+			Gateway: &GatewayConfig{
+				Enabled:     true,
+				Image:       "example.com/mcp-proxy:latest",
+				Port:        8091,
+				UpstreamURL: "http://127.0.0.1:8088",
+				StripPrefix: "/gateway-server",
+			},
+			Auth: &AuthConfig{
+				Mode: AuthMode("header"),
+			},
+			Policy: &PolicyConfig{
+				Mode:            PolicyMode("allow-list"),
+				DefaultDecision: PolicyDecision("deny"),
+			},
+			Session: &SessionConfig{
+				Required:   true,
+				HeaderName: "X-MCP-Agent-Session",
+			},
+			Tools: []ToolConfig{
+				{Name: "delete_user", RequiredTrust: TrustLevel("high")},
+			},
+			SecretEnvVars: []SecretEnvVar{
+				{
+					Name: "OPENAI_API_KEY",
+					SecretKeyRef: &SecretKeyRef{
+						Name: "provider-creds",
+						Key:  "openai",
+					},
+				},
+			},
+			Analytics: &AnalyticsConfig{
+				Enabled:   true,
+				IngestURL: "http://analytics.default.svc/api/events",
+				Source:    "gateway-server",
+				EventType: "mcp.request",
+				APIKeySecretRef: &SecretKeyRef{
+					Name: "analytics-creds",
+					Key:  "api-key",
+				},
+			},
+			Rollout: &RolloutConfig{
+				Strategy:       RolloutStrategy("Canary"),
+				CanaryReplicas: int32Ptr(1),
+			},
+		}
+
+		err := GenerateCRD(server, outputPath)
+		if err != nil {
+			t.Fatalf("GenerateCRD failed: %v", err)
+		}
+
+		data, err := os.ReadFile(outputPath)
+		if err != nil {
+			t.Fatalf("failed to read output file: %v", err)
+		}
+
+		var rendered map[string]any
+		if err := yaml.Unmarshal(data, &rendered); err != nil {
+			t.Fatalf("failed to unmarshal generated yaml: %v", err)
+		}
+
+		spec := assertMapValue(t, rendered, "spec")
+		gateway := assertMapValue(t, spec, "gateway")
+		assertMapBoolValue(t, gateway, "enabled", true)
+		assertMapStringValue(t, gateway, "image", "example.com/mcp-proxy:latest")
+		assertMapIntValue(t, gateway, "port", 8091)
+		assertMapStringValue(t, gateway, "upstreamurl", "http://127.0.0.1:8088")
+		assertMapStringValue(t, gateway, "stripprefix", "/gateway-server")
+
+		auth := assertMapValue(t, spec, "auth")
+		assertMapStringValue(t, auth, "mode", "header")
+
+		policy := assertMapValue(t, spec, "policy")
+		assertMapStringValue(t, policy, "mode", "allow-list")
+		assertMapStringValue(t, policy, "defaultdecision", "deny")
+
+		session := assertMapValue(t, spec, "session")
+		assertMapBoolValue(t, session, "required", true)
+
+		tools := assertSliceValue(t, spec, "tools")
+		if len(tools) != 1 {
+			t.Fatalf("expected 1 tool, got %d", len(tools))
+		}
+		tool := assertMapItem(t, tools[0], "tools[0]")
+		assertMapStringValue(t, tool, "name", "delete_user")
+		assertMapStringValue(t, tool, "requiredtrust", "high")
+
+		secretEnvVars := assertSliceValue(t, spec, "secretenvvars")
+		if len(secretEnvVars) != 1 {
+			t.Fatalf("expected 1 secret env var, got %d", len(secretEnvVars))
+		}
+		secretEnv := assertMapItem(t, secretEnvVars[0], "secretenvvars[0]")
+		assertMapStringValue(t, secretEnv, "name", "OPENAI_API_KEY")
+		secretKeyRef := assertMapValue(t, secretEnv, "secretkeyref")
+		assertMapStringValue(t, secretKeyRef, "name", "provider-creds")
+		assertMapStringValue(t, secretKeyRef, "key", "openai")
+
+		analytics := assertMapValue(t, spec, "analytics")
+		assertMapBoolValue(t, analytics, "enabled", true)
+		assertMapStringValue(t, analytics, "ingesturl", "http://analytics.default.svc/api/events")
+		assertMapStringValue(t, analytics, "source", "gateway-server")
+		assertMapStringValue(t, analytics, "eventtype", "mcp.request")
+		apiKeySecretRef := assertMapValue(t, analytics, "apikeysecretref")
+		assertMapStringValue(t, apiKeySecretRef, "name", "analytics-creds")
+		assertMapStringValue(t, apiKeySecretRef, "key", "api-key")
+
+		rollout := assertMapValue(t, spec, "rollout")
+		assertMapStringValue(t, rollout, "strategy", "Canary")
+		assertMapIntValue(t, rollout, "canaryreplicas", 1)
 	})
 
 	t.Run("creates parent directories", func(t *testing.T) {
@@ -231,5 +352,81 @@ func assertContains(t *testing.T, content, substr string) {
 	t.Helper()
 	if !strings.Contains(content, substr) {
 		t.Errorf("expected content to contain %q, got:\n%s", substr, content)
+	}
+}
+
+func assertMapValue(t *testing.T, data map[string]any, key string) map[string]any {
+	t.Helper()
+	value, ok := data[key]
+	if !ok {
+		t.Fatalf("expected key %q to exist", key)
+	}
+	return assertMapItem(t, value, key)
+}
+
+func assertSliceValue(t *testing.T, data map[string]any, key string) []any {
+	t.Helper()
+	value, ok := data[key]
+	if !ok {
+		t.Fatalf("expected key %q to exist", key)
+	}
+	items, ok := value.([]any)
+	if !ok {
+		t.Fatalf("expected key %q to be a slice, got %T", key, value)
+	}
+	return items
+}
+
+func assertMapItem(t *testing.T, value any, label string) map[string]any {
+	t.Helper()
+	item, ok := value.(map[string]any)
+	if !ok {
+		t.Fatalf("expected %s to be a map, got %T", label, value)
+	}
+	return item
+}
+
+func assertMapStringValue(t *testing.T, data map[string]any, key, want string) {
+	t.Helper()
+	value, ok := data[key]
+	if !ok {
+		t.Fatalf("expected key %q to exist", key)
+	}
+	got, ok := value.(string)
+	if !ok {
+		t.Fatalf("expected key %q to be a string, got %T", key, value)
+	}
+	if got != want {
+		t.Fatalf("%s = %q, want %q", key, got, want)
+	}
+}
+
+func assertMapBoolValue(t *testing.T, data map[string]any, key string, want bool) {
+	t.Helper()
+	value, ok := data[key]
+	if !ok {
+		t.Fatalf("expected key %q to exist", key)
+	}
+	got, ok := value.(bool)
+	if !ok {
+		t.Fatalf("expected key %q to be a bool, got %T", key, value)
+	}
+	if got != want {
+		t.Fatalf("%s = %t, want %t", key, got, want)
+	}
+}
+
+func assertMapIntValue(t *testing.T, data map[string]any, key string, want int) {
+	t.Helper()
+	value, ok := data[key]
+	if !ok {
+		t.Fatalf("expected key %q to exist", key)
+	}
+	got, ok := value.(int)
+	if !ok {
+		t.Fatalf("expected key %q to be an int, got %T", key, value)
+	}
+	if got != want {
+		t.Fatalf("%s = %d, want %d", key, got, want)
 	}
 }
