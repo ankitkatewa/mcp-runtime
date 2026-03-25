@@ -14,12 +14,12 @@
     <div class="hero-panel">
       <div class="panel-header">
         <div>
-          <h3>At a glance</h3>
-          <p>Everything you need to ship MCP servers confidently.</p>
+          <h3>What exists right now</h3>
+          <p>The site now mirrors the actual runtime plus sentinel surface in the repo.</p>
         </div>
-        <span class="chip">Platform stack</span>
+        <span class="chip">alpha</span>
       </div>
-      <ul>
+      <ul class="panel-list">
         {% for item in at_a_glance %}
           <li>{{ item }}</li>
         {% endfor %}
@@ -29,38 +29,29 @@
 
   <section class="stats container">
     {% for stat in stats %}
-      <div class="stat-card" style="--delay: {{ loop.index0 * 0.08 }}s;">
+      <div class="stat-card">
         <div class="stat-value">{{ stat.value }}</div>
         <div class="stat-label">{{ stat.label }}</div>
       </div>
     {% endfor %}
   </section>
 
-  <section id="overview" class="section container">
+  <section id="product" class="section container">
     <div class="section-header">
-      <h2>{{ overview.title }}</h2>
-      <p>{{ overview.intro }}</p>
+      <h2>{{ platform.title }}</h2>
+      <p>{{ platform.intro }}</p>
     </div>
     <div class="card-grid">
-      {% for item in overview["items"] %}
-        <article class="card" style="--delay: {{ loop.index0 * 0.08 }}s;">
+      {% for item in platform["items"] %}
+        <article class="card">
+          <span class="card-tag">{{ item.tag }}</span>
           <h3>{{ item.title }}</h3>
           <p>{{ item.body }}</p>
-        </article>
-      {% endfor %}
-    </div>
-  </section>
-
-  <section id="features" class="section container">
-    <div class="section-header">
-      <h2>Platform features</h2>
-      <p>Ship repeatable deployments with tooling built for MCP server fleets.</p>
-    </div>
-    <div class="card-grid">
-      {% for item in features %}
-        <article class="card" style="--delay: {{ loop.index0 * 0.08 }}s;">
-          <h3>{{ item.title }}</h3>
-          <p>{{ item.body }}</p>
+          <ul class="card-list">
+            {% for point in item.highlights %}
+              <li>{{ point }}</li>
+            {% endfor %}
+          </ul>
         </article>
       {% endfor %}
     </div>
@@ -69,11 +60,11 @@
   <section id="workflow" class="section container">
     <div class="section-header">
       <h2>End-to-end workflow</h2>
-      <p>Standardize how teams go from definition to routed MCP servers.</p>
+      <p>Move from cluster bootstrap to grants, sessions, and audit trails with one control-plane path.</p>
     </div>
     <div class="workflow-grid">
       {% for item in workflow %}
-        <article class="step-card" style="--delay: {{ loop.index0 * 0.08 }}s;">
+        <article class="step-card">
           <div class="step-number">{{ item.step }}</div>
           <div>
             <h3>{{ item.title }}</h3>
@@ -84,16 +75,76 @@
     </div>
   </section>
 
-  <section id="architecture" class="section container">
+  <section id="cli" class="section container">
     <div class="section-header">
-      <h2>Platform architecture</h2>
-      <p>Designed to fit right into your existing delivery pipeline.</p>
+      <h2>{{ cli_surface.title }}</h2>
+      <p>{{ cli_surface.intro }}</p>
     </div>
     <div class="card-grid">
-      {% for item in architecture %}
-        <article class="card" style="--delay: {{ loop.index0 * 0.08 }}s;">
+      {% for item in cli_surface["items"] %}
+        <article class="card">
+          <div class="card-command"><code>{{ item.command }}</code></div>
           <h3>{{ item.title }}</h3>
           <p>{{ item.body }}</p>
+          <ul class="card-list">
+            {% for point in item.highlights %}
+              <li>{{ point }}</li>
+            {% endfor %}
+          </ul>
+        </article>
+      {% endfor %}
+    </div>
+  </section>
+
+  <section id="sentinel" class="section container">
+    <div class="section-header">
+      <h2>{{ sentinel.title }}</h2>
+      <p>{{ sentinel.intro }}</p>
+    </div>
+    <div class="card-grid">
+      {% for item in sentinel["items"] %}
+        <article class="card">
+          <span class="card-tag">{{ item.tag }}</span>
+          <h3>{{ item.title }}</h3>
+          <p>{{ item.body }}</p>
+          <ul class="card-list">
+            {% for point in item.highlights %}
+              <li>{{ point }}</li>
+            {% endfor %}
+          </ul>
+        </article>
+      {% endfor %}
+    </div>
+  </section>
+
+  <section id="docs" class="section container">
+    <div class="section-header">
+      <h2>{{ docs_library.title }}</h2>
+      <p>{{ docs_library.intro }}</p>
+    </div>
+    <div class="card-grid">
+      {% for item in docs_library["items"] %}
+        <article class="card action-card">
+          <span class="card-tag">{{ item.tag }}</span>
+          <h3>{{ item.title }}</h3>
+          <p>{{ item.body }}</p>
+          <a class="button secondary" href="{{ item.href }}">{{ item.label }}</a>
+        </article>
+      {% endfor %}
+    </div>
+  </section>
+
+  <section id="contact" class="section container">
+    <div class="section-header">
+      <h2>Contact</h2>
+      <p>If you want to discuss the project, your MCP rollout, or anything in general, reach out directly.</p>
+    </div>
+    <div class="card-grid">
+      {% for item in contacts %}
+        <article class="card contact-card">
+          <h3>{{ item.title }}</h3>
+          <p>{{ item.body }}</p>
+          <a class="button secondary" href="{{ item.href }}"{% if item.new_tab %} target="_blank" rel="noreferrer"{% endif %}>{{ item.label }}</a>
         </article>
       {% endfor %}
     </div>
