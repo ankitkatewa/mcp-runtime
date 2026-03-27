@@ -1,117 +1,127 @@
+"""Flask app serving the marketing site and static documentation."""
+
 from flask import Flask, abort, redirect, render_template, send_from_directory
 from werkzeug.exceptions import NotFound
 
 app = Flask(__name__)
 
 NAV_LINKS = [
-    {"label": "Product", "href": "#product"},
+    {"label": "Overview", "href": "#product"},
+    {"label": "Documentation", "href": "#docs"},
     {"label": "Workflow", "href": "#workflow"},
-    {"label": "CLI", "href": "#cli"},
-    {"label": "Sentinel", "href": "#sentinel"},
-    {"label": "Docs", "href": "#docs"},
-    {"label": "Contact", "href": "#contact"},
+    {"label": "Surfaces", "href": "#surfaces"},
 ]
 
 HERO = {
-    "badge": "mcpruntime.org",
-    "title": "Run internal MCP servers like a platform.",
+    "eyebrow": "Open source MCP platform for Kubernetes",
+    "title": "Deploy, govern, and observe MCP services on Kubernetes.",
     "subtitle": (
-        "MCP Runtime is a self-hosted Kubernetes control plane for shipping, "
-        "governing, and observing MCP servers. It combines CRDs, operator "
-        "reconciliation, registry and ingress workflows, per-tool access "
-        "controls, and the bundled mcp-sentinel analytics plane."
+        "MCP Runtime gives platform teams a higher-level control plane for MCP "
+        "delivery, access, policy, audit, and observability."
     ),
-    "primary": {"label": "Read the docs", "href": "/docs/"},
-    "secondary": {"label": "Open API reference", "href": "/docs/api"},
+    "primary": {"label": "Documentation", "href": "/docs/"},
+    "secondary": {"label": "Runtime guide", "href": "/docs/runtime"},
+    "highlights": [
+        "Open source",
+        "Kubernetes-native",
+        "Governed request path",
+    ],
+    "proof_kicker": "Reference manifest",
+    "proof_title": "One service definition. One operating model.",
+    "proof_intro": (
+        "The runtime owns rollout and routing from this service definition. "
+        "Sentinel governs the live request path with policy, audit, and "
+        "observability."
+    ),
+    "proof_code": """apiVersion: mcpruntime.org/v1alpha1
+kind: MCPServer
+metadata:
+  name: payments
+spec:
+  image: registry.example.com/payments-mcp:v1.0.0
+  port: 8088
+  ingressHost: mcp.example.com
+  ingressPath: /payments/mcp
+  gateway:
+    enabled: true
+  analytics:
+    enabled: true""",
+    "stage_items": [
+        {
+            "label": "Runtime",
+            "value": "MCP platform control plane",
+            "body": "Bootstrap, reconciliation, rollout, ingress, and lifecycle.",
+        },
+        {
+            "label": "Access",
+            "value": "Grants + sessions stay explicit",
+            "body": "Consent, trust ceilings, expiry, and revocation stay first-class.",
+        },
+        {
+            "label": "Sentinel",
+            "value": "Governed MCP request path",
+            "body": "Policy, audit, and observability on live MCP requests.",
+        },
+    ],
+    "stage_signals": [
+        "route admitted",
+        "policy synced",
+        "telemetry flowing",
+    ],
 }
 
-AT_A_GLANCE = [
-    "The CLI already covers setup, cluster, status, server, registry, and pipeline flows.",
-    "Three core resources separate deployment, access grants, and consented agent sessions.",
-    "Gateway mode enforces per-tool policy, trust ceilings, and allow or deny audit decisions.",
-    "mcp-sentinel adds ingest, processor, API, UI, gateway, storage, and observability services.",
-]
+STATUS = {
+    "label": "Alpha",
+    "body": (
+        "Runtime, access, and the governed request path already work end to end. "
+        "The architecture is stable enough to evaluate. The API and UX are still evolving."
+    ),
+}
 
-STATS = [
-    {
-        "value": "6 CLI groups",
-        "label": "setup, cluster, status, server, registry, and pipeline are already wired in the repo.",
-    },
-    {
-        "value": "3 core resources",
-        "label": "MCPServer, MCPAccessGrant, and MCPAgentSession model deploy, access, and consent.",
-    },
-    {
-        "value": "14 bundled workloads",
-        "label": "mcp-runtime status checks ClickHouse, Kafka, ingest, API, UI, gateway, and the observability stack.",
-    },
-    {
-        "value": "README essentials in docs",
-        "label": "Requirements, quick start, key commands, architecture, and current scope now live in the docs area.",
-    },
-]
-
-PLATFORM = {
-    "title": "What ships in the repo today",
+PRODUCT = {
+    "title": "Three jobs, one platform boundary.",
     "intro": (
-        "This is no longer just an operator skeleton. The runtime already spans "
-        "bootstrap, delivery, access control, gateway enforcement, and analytics."
+        "Keep lifecycle, grants, and request governance distinct without splitting them "
+        "across unrelated tools."
     ),
     "items": [
         {
-            "tag": "Bootstrap",
-            "title": "Cluster, ingress, registry, and TLS setup",
+            "label": "Runtime",
+            "title": "Control plane for MCP services",
             "body": (
-                "mcp-runtime setup can initialize namespaces and CRDs, install "
-                "ingress, deploy the internal registry or use a provisioned one, "
-                "and layer in cert-manager based TLS when needed."
+                "Own setup, registry, ingress, reconciliation, and rollout from one "
+                "Kubernetes-native surface."
             ),
-            "highlights": [
-                "Kind, EKS, GKE, and AKS aware cluster flows",
-                "Internal registry or external registry configuration",
-                "with-tls and without-sentinel setup switches",
+            "points": [
+                "Cluster bootstrap",
+                "Reconciliation",
+                "Rollout + routes",
             ],
         },
         {
-            "tag": "Runtime",
-            "title": "Operator-managed MCP server delivery",
+            "label": "Sentinel",
+            "title": "Governed request path with policy and observability",
             "body": (
-                "MCPServer drives image, replicas, ports, ingress, resources, env "
-                "vars, secret-backed env vars, tool inventory, auth, policy, "
-                "session, gateway, analytics, and rollout strategy for each server."
+                "Put enforcement, audit, and telemetry on live MCP requests instead "
+                "of rebuilding them inside every service."
             ),
-            "highlights": [
-                "Deployment, Service, and Ingress reconciliation",
-                "Route defaults to /{server-name}/mcp",
-                "RollingUpdate, Recreate, and Canary rollouts",
+            "points": [
+                "Proxy enforcement",
+                "Audit + telemetry",
+                "UI + APIs",
             ],
         },
         {
-            "tag": "Access",
-            "title": "Separate grants and sessions for authorization state",
+            "label": "Access",
+            "title": "Explicit grants and sessions",
             "body": (
-                "MCPAccessGrant and MCPAgentSession move access policy out of the "
-                "deployment object so human and agent subjects, trust ceilings, "
-                "consent, expiry, and revocation stay first-class."
+                "Keep entitlement, consent, trust, and revocation in dedicated "
+                "resources instead of app-specific conventions."
             ),
-            "highlights": [
-                "Per-tool allow or deny rules",
-                "low, medium, and high trust levels",
-                "Revocation and upstream token references",
-            ],
-        },
-        {
-            "tag": "Delivery",
-            "title": "Build, push, generate, and deploy from one CLI",
-            "body": (
-                "The repo includes image build helpers, direct or in-cluster "
-                "registry push flows, metadata-to-CRD generation, and manifest "
-                "deployment so local and CI/CD paths use the same surface."
-            ),
-            "highlights": [
-                "server build image for image creation",
-                "registry push in direct or in-cluster mode",
-                "pipeline generate and pipeline deploy for metadata workflows",
+            "points": [
+                "Entitlement",
+                "Consent + expiry",
+                "Revocation",
             ],
         },
     ],
@@ -120,362 +130,147 @@ PLATFORM = {
 WORKFLOW = [
     {
         "step": "01",
-        "title": "Provision or connect a cluster",
+        "title": "Define once",
         "body": (
-            "Use cluster provision for a new Kind or cloud path, or point the CLI "
-            "at an existing kubeconfig and context."
+            "Describe image, route, gateway, analytics, and access expectations in "
+            "one runtime definition."
         ),
     },
     {
         "step": "02",
-        "title": "Bootstrap the platform",
+        "title": "Reconcile",
         "body": (
-            "Run setup to install CRDs, namespaces, ingress, registry, operator, "
-            "gateway image wiring, and the bundled mcp-sentinel stack."
+            "Use the CLI and operator to prepare cluster state and expose the MCP "
+            "service through a stable path."
         ),
     },
     {
         "step": "03",
-        "title": "Describe servers and trust requirements",
+        "title": "Govern live requests",
         "body": (
-            "Define metadata or CRDs for tools, auth headers, policy mode, "
-            "session requirements, analytics emission, and rollout strategy."
+            "Route requests through the proxy path when gateway mode is enabled so "
+            "identity, policy, audit, and telemetry happen in one place."
         ),
     },
     {
         "step": "04",
-        "title": "Publish and deploy",
+        "title": "Inspect and iterate",
         "body": (
-            "Build images, push them to the chosen registry, generate manifests "
-            "from metadata when needed, and apply them to the cluster."
-        ),
-    },
-    {
-        "step": "05",
-        "title": "Grant access and observe behavior",
-        "body": (
-            "Create access grants and agent sessions, then use status commands and "
-            "mcp-sentinel UI or APIs to inspect runtime and audit activity."
+            "Use grants, sessions, and sentinel surfaces to review behavior and "
+            "tighten policy as the service evolves."
         ),
     },
 ]
 
-CLI_SURFACE = {
-    "title": "CLI surface",
+SURFACES = {
+    "title": "Four surfaces, one documentation model",
     "intro": (
-        "The CLI is the product front door today. These command groups already "
-        "exist in the codebase and are the path users actually operate."
+        "Move from architecture to day-two operations without switching mental models."
     ),
     "items": [
         {
-            "command": "mcp-runtime setup",
-            "title": "Bootstrap the platform stack",
-            "body": (
-                "Installs CRDs, namespaces, ingress, registry, operator, gateway "
-                "proxy image, and the bundled sentinel stack. Flags cover TLS, "
-                "test mode, registry sizing, and skipping sentinel."
-            ),
-            "highlights": [
-                "--with-tls",
-                "--without-sentinel",
-                "--registry-type and --registry-storage",
-            ],
+            "name": "Runtime",
+            "path": "setup / cluster / operator / MCPServer",
+            "body": "Prepare clusters and keep MCP services reconciled.",
         },
         {
-            "command": "mcp-runtime cluster",
-            "title": "Manage cluster lifecycle and ingress",
-            "body": (
-                "Includes init, status, config, provision, and cert commands. "
-                "The config path handles kubeconfig, ingress manifests, and cloud "
-                "provider credential wiring."
-            ),
-            "highlights": [
-                "cluster init and cluster status",
-                "cluster config for ingress and kubeconfig",
-                "cluster provision plus cert status, apply, and wait",
-            ],
+            "name": "Access",
+            "path": "MCPAccessGrant / MCPAgentSession",
+            "body": "Keep entitlement, consent, and revocation explicit.",
         },
         {
-            "command": "mcp-runtime server",
-            "title": "Work with MCPServer resources and image builds",
-            "body": (
-                "List, get, create, delete, inspect logs, and inspect runtime "
-                "status for MCP servers. The build helper nests under server build "
-                "and focuses on image creation."
-            ),
-            "highlights": [
-                "server list, get, create, delete, logs, and status",
-                "server build image",
-                "server create from flags or a YAML file",
-            ],
+            "name": "Sentinel",
+            "path": "proxy / gateway / ingest / processor / api / ui",
+            "body": "Handle live request governance, audit, and observability.",
         },
         {
-            "command": "mcp-runtime registry",
-            "title": "Push to the internal or external registry",
-            "body": (
-                "Show registry status and connection info, configure an external "
-                "registry, and retag or push images with either direct Docker push "
-                "or an in-cluster skopeo helper job."
-            ),
-            "highlights": [
-                "registry status and registry info",
-                "registry provision for external registries",
-                "registry push --mode in-cluster or direct",
-            ],
-        },
-        {
-            "command": "mcp-runtime pipeline",
-            "title": "Generate CRDs from metadata and deploy them",
-            "body": (
-                "Pipeline commands turn .mcp metadata into Kubernetes manifests and "
-                "apply those manifests to a target namespace for CI/CD friendly "
-                "delivery."
-            ),
-            "highlights": [
-                "pipeline generate --dir .mcp --output manifests",
-                "pipeline deploy --dir manifests",
-                "Namespace override support on deploy",
-            ],
-        },
-        {
-            "command": "mcp-runtime status",
-            "title": "Inspect the entire platform in one view",
-            "body": (
-                "The top-level status command checks the cluster, registry, "
-                "operator, MCP servers, and the sentinel workloads so teams can "
-                "spot missing or pending components quickly."
-            ),
-            "highlights": [
-                "Registry and operator readiness",
-                "All bundled sentinel workloads",
-                "Quick MCPServer inventory",
-            ],
-        },
-    ],
-}
-
-SENTINEL = {
-    "title": "mcp-sentinel analytics and gateway plane",
-    "intro": (
-        "The companion repo is broader than a dashboard. It holds the analytics, "
-        "gateway, and policy-enforcement services that sit around MCP servers."
-    ),
-    "items": [
-        {
-            "tag": "Gateway",
-            "title": "Transparent MCP proxy sidecar",
-            "body": (
-                "The proxy can sit in front of a server, read human, agent, and "
-                "session headers, enforce tool-level policy, and emit allow or "
-                "deny events with trust context."
-            ),
-            "highlights": [
-                "Default identity headers for human, agent, and session IDs",
-                "allow-list and observe policy modes",
-                "Per-tool trust-aware allow or deny decisions",
-            ],
-        },
-        {
-            "tag": "Ingest",
-            "title": "Event ingestion service",
-            "body": (
-                "POST /events writes audit and traffic data into Kafka. API keys "
-                "or optional OIDC JWT validation can protect the ingest path."
-            ),
-            "highlights": [
-                "Kafka topic defaults to mcp.events",
-                "Health and metrics endpoints included",
-                "API key and optional bearer-token auth",
-            ],
-        },
-        {
-            "tag": "Processing",
-            "title": "Kafka to ClickHouse pipeline",
-            "body": (
-                "The processor consumes Kafka batches and writes structured event "
-                "records into ClickHouse, including indexed fields for server, "
-                "namespace, decision, and tool name."
-            ),
-            "highlights": [
-                "ClickHouse backed event table",
-                "Batch size and flush interval controls",
-                "Indexed audit dimensions for filtering",
-            ],
-        },
-        {
-            "tag": "Query",
-            "title": "API and UI for audit exploration",
-            "body": (
-                "The API exposes events, stats, sources, event types, and filtered "
-                "queries. The UI surfaces totals, latest source, last event, auto "
-                "refresh, and the live event stream."
-            ),
-            "highlights": [
-                "GET /api/events and GET /api/stats",
-                "Filter by server, agent, session, decision, and tool",
-                "Simple built-in dashboard UI",
-            ],
-        },
-        {
-            "tag": "Observability",
-            "title": "Full metrics, traces, and logs path",
-            "body": (
-                "The bundled manifests include Prometheus, Grafana, OpenTelemetry "
-                "Collector, Tempo, Loki, and Promtail so sentinel emits more than "
-                "just audit rows."
-            ),
-            "highlights": [
-                "Prometheus and Grafana dashboards",
-                "OTLP export support",
-                "Tempo, Loki, and Promtail included",
-            ],
-        },
-        {
-            "tag": "Manifests",
-            "title": "Deployment-ready stack files and examples",
-            "body": (
-                "The k8s directory includes namespace, config, secrets, ClickHouse, "
-                "Kafka, API, UI, gateway, observability manifests, plus an example "
-                "MCP server and sidecar wiring."
-            ),
-            "highlights": [
-                "mcp-sentinel-gateway routes API, ingest, and UI",
-                "Example in-cluster MCP server manifest",
-                "Standalone sidecar manifest for MCP proxy integration",
-            ],
+            "name": "Docs",
+            "path": "runtime / cli / sentinel / api",
+            "body": "Move from architecture to exact fields and commands quickly.",
         },
     ],
 }
 
 DOCS_LIBRARY = {
-    "title": "Documentation that maps to the actual codebase",
+    "title": "Start with the page that matches the task",
     "intro": (
-        "The docs area now carries the README essentials plus deeper runtime, CLI, "
-        "sentinel, and API pages so the public site covers the full alpha surface."
+        "Documentation is the fastest way to understand the platform boundary and the operator workflow."
     ),
     "items": [
         {
-            "tag": "Overview",
-            "title": "Docs home",
-            "body": (
-                "Start with requirements, quick start commands, key commands, "
-                "current scope, and links to the deeper guides."
-            ),
-            "href": "/docs/",
-            "label": "Open docs",
-        },
-        {
             "tag": "Runtime",
-            "title": "Control plane and architecture",
-            "body": (
-                "See how MCPServer, MCPAccessGrant, and MCPAgentSession fit with "
-                "operator reconciliation, ingress, registry, rollout, and traffic."
-            ),
+            "title": "Control plane and service lifecycle",
+            "body": "See cluster bootstrap, reconciliation, rollout, ingress, and delivery state.",
             "href": "/docs/runtime",
-            "label": "Read runtime docs",
+            "label": "Runtime docs",
         },
         {
             "tag": "CLI",
-            "title": "Command groups and operational flows",
-            "body": (
-                "Use concrete command examples for setup, cluster, server, registry, "
-                "pipeline, and status workflows."
-            ),
+            "title": "Commands operators run day to day",
+            "body": "Start with setup, cluster, server, registry, pipeline, and status workflows.",
             "href": "/docs/cli",
-            "label": "Read CLI docs",
+            "label": "CLI docs",
         },
         {
             "tag": "Sentinel",
-            "title": "Analytics, gateway, and observability",
-            "body": (
-                "Understand the ingest, processor, API, UI, proxy, data, and "
-                "observability pieces that mcp-runtime can deploy by default."
-            ),
+            "title": "Governed request path and observability",
+            "body": "Review proxy enforcement, audit events, query APIs, and observability.",
             "href": "/docs/sentinel",
-            "label": "Read sentinel docs",
+            "label": "Sentinel docs",
         },
         {
             "tag": "API",
-            "title": "Resource fields and endpoint reference",
-            "body": (
-                "Use YAML examples, trust semantics, gateway headers, and the "
-                "sentinel API endpoint list as the current contract."
-            ),
+            "title": "The resource and request contract",
+            "body": "Use the API reference for YAML examples, field semantics, headers, and status.",
             "href": "/docs/api",
-            "label": "Read API docs",
+            "label": "API reference",
         },
     ],
 }
 
 CALLOUT = {
-    "title": "Still alpha, but already broad enough to evaluate seriously.",
+    "title": "Start with runtime docs, then follow the request path.",
     "body": (
-        "The current repo covers platform bootstrap, MCP server deployment, access "
-        "grants, consented sessions, gateway policy, audit events, and the bundled "
-        "mcp-sentinel stack. The docs now point at that full surface."
+        "Read the runtime first for lifecycle and delivery, then Sentinel for policy, "
+        "audit, and observability on live MCP requests."
     ),
-    "cta": {"label": "Start with the docs", "href": "/docs/"},
+    "primary": {"label": "Runtime docs", "href": "/docs/runtime"},
+    "secondary": {"label": "Sentinel docs", "href": "/docs/sentinel"},
 }
-
-CONTACTS = [
-    {
-        "title": "Email",
-        "body": "Reach out directly if you want to discuss the project, collaborate, or compare MCP platform ideas.",
-        "label": "princekrroshan01@gmail.com",
-        "href": "mailto:princekrroshan01@gmail.com",
-    },
-    {
-        "title": "Book a meeting",
-        "body": "Use the calendar link if you want to discuss the project, my work, or anything in general.",
-        "label": "Book a meeting",
-        "href": "https://cal.com/prince-roshan-izyp81",
-        "new_tab": True,
-    },
-    {
-        "title": "LinkedIn",
-        "body": "Connect on LinkedIn for updates, questions, introductions, or follow-up conversations.",
-        "label": "Prince Roshan",
-        "href": "https://www.linkedin.com/in/prince-roshan-91131116b/",
-        "new_tab": True,
-    },
-]
 
 
 @app.route("/")
 def home():
+    """Render the main marketing site."""
     return render_template(
         "index.html",
         nav_links=NAV_LINKS,
         hero=HERO,
-        at_a_glance=AT_A_GLANCE,
-        stats=STATS,
-        platform=PLATFORM,
+        status=STATUS,
+        product=PRODUCT,
         workflow=WORKFLOW,
-        cli_surface=CLI_SURFACE,
-        sentinel=SENTINEL,
+        surfaces=SURFACES,
         docs_library=DOCS_LIBRARY,
         callout=CALLOUT,
-        contacts=CONTACTS,
     )
 
 
 @app.route("/docs")
 def docs_redirect():
+    """Redirect the bare docs path to the canonical trailing-slash URL."""
     return redirect("/docs/")
 
 
 @app.route("/docs/")
-@app.route("/docs/welcome")
-@app.route("/docs/welcome/")
 def docs_index():
+    """Serve the docs landing page."""
     return send_from_directory("docs", "index.html")
 
 
 @app.route("/docs/<path:page>")
 def docs_page(page: str):
+    """Serve a static docs page by path, accepting slash-terminated URLs."""
     page = page.rstrip("/")
-    if page in {"", "welcome", "index"}:
-        return send_from_directory("docs", "index.html")
     if not page.endswith(".html"):
         page = f"{page}.html"
     try:
