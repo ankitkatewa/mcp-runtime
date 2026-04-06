@@ -1,4 +1,7 @@
-FROM golang:1.24.11-alpine AS builder
+# Keep the operator image on a patched Go 1.25.x builder so Trivy does not
+# flag stdlib CVEs in the shipped binary. The repo module itself stays on Go
+# 1.24.x until the generated-manifest and service build paths are upgraded.
+FROM golang:1.25.8-alpine3.23 AS builder
 
 WORKDIR /build
 
@@ -9,9 +12,9 @@ COPY . .
 
 RUN CGO_ENABLED=0 GOOS=linux go build -a -installsuffix cgo -o manager ./cmd/operator
 
-FROM alpine:latest
+FROM alpine:3.23
 
-RUN apk --no-cache add ca-certificates tzdata
+RUN apk --no-cache upgrade && apk --no-cache add ca-certificates tzdata
 
 WORKDIR /
 
