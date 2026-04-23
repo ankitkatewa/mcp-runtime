@@ -157,7 +157,30 @@ func checkClusterStatusQuiet() error {
 		return nil
 	}
 	detail := commandErrorDetail(output, err)
+	if hint, handled := clusterSetupHint(detail); handled {
+		return wrapWithSentinel(ErrClusterNotAccessible, err, hint)
+	}
 	return wrapWithSentinel(ErrClusterNotAccessible, err, fmt.Sprintf("cluster not accessible: %s", detail))
+}
+
+// clusterSetupHint returns a friendlier message when the cluster has not been
+// provisioned yet (missing kubectl, kubeconfig, or API not reachable).
+func clusterSetupHint(detail string) (string, bool) {
+	lower := strings.ToLower(detail)
+
+	switch {
+	case strings.Contains(lower, "executable file not found"),
+		strings.Contains(lower, "no such file or directory"):
+		return "Cluster not set up yet: kubectl is not installed. Install kubectl and run './bin/mcp-runtime setup --test-mode --ingress-manifest config/ingress/overlays/http'", true
+	case strings.Contains(lower, "connection refused"),
+		strings.Contains(lower, "unable to connect to the server"),
+		strings.Contains(lower, "no configuration has been provided"),
+		strings.Contains(lower, "context deadline exceeded"),
+		strings.Contains(lower, "the connection to the server"):
+		return "Cluster not set up yet: no Kubernetes API reachable. Run './bin/mcp-runtime setup --test-mode --ingress-manifest config/ingress/overlays/http' to create the local Kind cluster", true
+	default:
+		return "", false
+	}
 }
 
 func analyticsNamespaceInstalled(clusterReachable bool) (bool, error) {

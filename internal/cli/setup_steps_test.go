@@ -135,9 +135,11 @@ func TestOperatorImageStepSetsContext(t *testing.T) {
 	}
 }
 
-func TestOperatorImageStepTestModeSkipsBuildAndUsesPreloadedImage(t *testing.T) {
+func TestOperatorImageStepTestModeBuildsAndPushesToRegistry(t *testing.T) {
 	var buildCalls int32
 	var gatewayBuildCalls int32
+	var pushCalls int32
+	var gatewayPushCalls int32
 	ctx := &SetupContext{
 		Plan: SetupPlan{
 			TestMode: true,
@@ -149,29 +151,35 @@ func TestOperatorImageStepTestModeSkipsBuildAndUsesPreloadedImage(t *testing.T) 
 		OperatorImageFor:     func(_ *ExternalRegistryConfig) string { return "registry.example.com/mcp-runtime-operator:latest" },
 		GatewayProxyImageFor: func(_ *ExternalRegistryConfig) string { return "registry.example.com/mcp-sentinel-mcp-proxy:latest" },
 		BuildOperatorImage:   func(string) error { atomic.AddInt32(&buildCalls, 1); return nil },
-		PushOperatorImage:    func(string) error { t.Fatal("did not expect operator push in test mode"); return nil },
+		PushOperatorImage:    func(string) error { atomic.AddInt32(&pushCalls, 1); return nil },
 		BuildGatewayProxyImage: func(string) error {
 			atomic.AddInt32(&gatewayBuildCalls, 1)
 			return nil
 		},
-		PushGatewayProxyImage: func(string) error { t.Fatal("did not expect gateway push in test mode"); return nil },
+		PushGatewayProxyImage: func(string) error { atomic.AddInt32(&gatewayPushCalls, 1); return nil },
 	}
 
 	step := operatorImageStep{}
 	if err := step.Run(zap.NewNop(), deps, ctx); err != nil {
 		t.Fatalf("operator image step failed: %v", err)
 	}
-	if ctx.OperatorImage != testModeOperatorImage {
-		t.Fatalf("expected test mode image %q, got %q", testModeOperatorImage, ctx.OperatorImage)
+	if ctx.OperatorImage != "registry.example.com/mcp-runtime-operator:latest" {
+		t.Fatalf("expected test mode operator image to use registry, got %q", ctx.OperatorImage)
 	}
-	if ctx.GatewayProxyImage != testModeGatewayProxyImage {
-		t.Fatalf("expected test mode gateway image %q, got %q", testModeGatewayProxyImage, ctx.GatewayProxyImage)
+	if ctx.GatewayProxyImage != "registry.example.com/mcp-sentinel-mcp-proxy:latest" {
+		t.Fatalf("expected test mode gateway image to use registry, got %q", ctx.GatewayProxyImage)
 	}
-	if atomic.LoadInt32(&buildCalls) != 0 {
-		t.Fatalf("expected build to be skipped in test mode, got %d calls", buildCalls)
+	if atomic.LoadInt32(&buildCalls) != 1 {
+		t.Fatalf("expected operator build in test mode, got %d calls", buildCalls)
 	}
-	if atomic.LoadInt32(&gatewayBuildCalls) != 0 {
-		t.Fatalf("expected gateway build to be skipped in test mode, got %d calls", gatewayBuildCalls)
+	if atomic.LoadInt32(&gatewayBuildCalls) != 1 {
+		t.Fatalf("expected gateway build in test mode, got %d calls", gatewayBuildCalls)
+	}
+	if atomic.LoadInt32(&pushCalls) != 1 {
+		t.Fatalf("expected operator push in test mode, got %d calls", pushCalls)
+	}
+	if atomic.LoadInt32(&gatewayPushCalls) != 1 {
+		t.Fatalf("expected gateway push in test mode, got %d calls", gatewayPushCalls)
 	}
 }
 

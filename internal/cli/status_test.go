@@ -123,6 +123,25 @@ func TestShowPlatformStatus(t *testing.T) {
 		}
 	})
 
+	t.Run("shows-setup-hint-when-cluster-missing", func(t *testing.T) {
+		resetStatusTestConfig(t)
+
+		responses := map[string]commandResponse{
+			commandKey("kubectl", "cluster-info"): {
+				Stderr:   "exec: \"kubectl\": executable file not found in $PATH\n",
+				ExitCode: 127,
+			},
+		}
+
+		output := runShowPlatformStatus(t, responses)
+		if !strings.Contains(strings.ToLower(output), "not set up yet") {
+			t.Fatalf("expected setup hint when cluster missing, got output: %s", output)
+		}
+		if !strings.Contains(output, "setup") {
+			t.Fatalf("expected setup guidance in output, got: %s", output)
+		}
+	})
+
 	t.Run("surfaces external registry config errors instead of falling back to in-cluster registry", func(t *testing.T) {
 		resetStatusTestConfig(t)
 		DefaultCLIConfig = &CLIConfig{ProvisionedRegistryUsername: "user-only"}

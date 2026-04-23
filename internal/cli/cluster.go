@@ -243,10 +243,14 @@ func (m *ClusterManager) ConfigureKubeconfig(kubeconfig, context string) error {
 		return err
 	}
 	if _, err := os.Stat(path); err != nil {
+		msg := fmt.Sprintf("kubeconfig %q not found or not readable: %v", path, err)
+		if hint, handled := clusterSetupHint(err.Error()); handled {
+			msg = hint
+		}
 		wrappedErr := wrapWithSentinelAndContext(
 			ErrKubeconfigNotReadable,
 			err,
-			fmt.Sprintf("kubeconfig %q not found or not readable: %v", path, err),
+			msg,
 			map[string]any{"kubeconfig": path, "component": "cluster"},
 		)
 		Error("Kubeconfig not readable")

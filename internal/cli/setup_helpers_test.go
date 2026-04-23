@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -614,14 +615,38 @@ func TestRenderAnalyticsSecretManifestGeneratesKeysWhenMissing(t *testing.T) {
 }
 
 func TestPrepareAnalyticsImagesUsesTestModeImageSet(t *testing.T) {
-	got, err := prepareAnalyticsImages(zap.NewNop(), &ExternalRegistryConfig{URL: "registry.example.com"}, true, true, SetupDeps{})
+	var buildCalls int32
+	var pushCalls int32
+	deps := SetupDeps{
+		BuildAnalyticsImage: func(string, string, string) error {
+			atomic.AddInt32(&buildCalls, 1)
+			return nil
+		},
+		PushAnalyticsImage: func(string) error {
+			atomic.AddInt32(&pushCalls, 1)
+			return nil
+		},
+	}
+
+	got, err := prepareAnalyticsImages(zap.NewNop(), &ExternalRegistryConfig{URL: "registry.example.com"}, true, true, deps)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
-	want := testModeAnalyticsImageSet()
+	want := AnalyticsImageSet{
+		Ingest:    "registry.example.com/mcp-sentinel-ingest:latest",
+		API:       "registry.example.com/mcp-sentinel-api:latest",
+		Processor: "registry.example.com/mcp-sentinel-processor:latest",
+		UI:        "registry.example.com/mcp-sentinel-ui:latest",
+	}
 	if got != want {
 		t.Fatalf("prepareAnalyticsImages() = %+v, want %+v", got, want)
+	}
+	if atomic.LoadInt32(&buildCalls) != int32(len(analyticsComponents)) {
+		t.Fatalf("expected %d builds in test mode, got %d", len(analyticsComponents), buildCalls)
+	}
+	if atomic.LoadInt32(&pushCalls) != int32(len(analyticsComponents)) {
+		t.Fatalf("expected %d pushes in test mode, got %d", len(analyticsComponents), pushCalls)
 	}
 }
 
