@@ -177,7 +177,19 @@ func updateMetadataImage(serverName, imageName, tag, metadataFile, metadataDir s
 		return wrappedErr
 	}
 
-	if err := os.WriteFile(targetFile, data, 0o600); err != nil {
+	fileMode := os.FileMode(0o600)
+	if info, statErr := os.Stat(targetFile); statErr == nil {
+		fileMode = info.Mode().Perm()
+		if fileMode&0o200 == 0 {
+			writeErr := fmt.Errorf("file is not writable: %s", targetFile)
+			wrappedErr := wrapWithSentinel(ErrWriteMetadataFailed, writeErr, fmt.Sprintf("failed to write metadata: %v", writeErr))
+			Error("Failed to write metadata")
+			// Note: No logger available in this helper function
+			return wrappedErr
+		}
+	}
+
+	if err := os.WriteFile(targetFile, data, fileMode); err != nil {
 		wrappedErr := wrapWithSentinel(ErrWriteMetadataFailed, err, fmt.Sprintf("failed to write metadata: %v", err))
 		Error("Failed to write metadata")
 		// Note: No logger available in this helper function
