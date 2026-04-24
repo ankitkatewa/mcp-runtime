@@ -30,10 +30,15 @@ func (f *helperFakeRegistryManager) PushInCluster(_, _, _ string) error {
 func TestGetOperatorImage(t *testing.T) {
 	origOverride := DefaultCLIConfig.OperatorImage
 	origKubectl := kubectlClient
+	origTagResolver := setupImageTagResolver
 	t.Cleanup(func() {
 		DefaultCLIConfig.OperatorImage = origOverride
 		kubectlClient = origKubectl
+		setupImageTagResolver = origTagResolver
 	})
+
+	t.Setenv("MCP_RUNTIME_TEST_MODE", "1")
+	setupImageTagResolver = func() string { return "deadbeef" }
 
 	t.Run("uses override when set", func(t *testing.T) {
 		DefaultCLIConfig.OperatorImage = "override/operator:v1"
@@ -56,9 +61,6 @@ func TestGetOperatorImage(t *testing.T) {
 		DefaultCLIConfig.OperatorImage = ""
 		mock := &MockExecutor{
 			CommandFunc: func(spec ExecSpec) *MockCommand {
-				if contains(spec.Args, "jsonpath={.spec.clusterIP}") {
-					return &MockCommand{OutputData: []byte("10.0.0.1")}
-				}
 				if contains(spec.Args, "jsonpath={.spec.ports[0].port}") {
 					return &MockCommand{OutputData: []byte("5000")}
 				}
@@ -67,8 +69,18 @@ func TestGetOperatorImage(t *testing.T) {
 		}
 		kubectlClient = &KubectlClient{exec: mock, validators: nil}
 		got := getOperatorImage(nil)
-		if got != "10.0.0.1:5000/mcp-runtime-operator:latest" {
+		if got != "registry.registry.svc.cluster.local:5000/mcp-runtime-operator:latest" {
 			t.Fatalf("unexpected platform registry image: %q", got)
+		}
+	})
+
+	t.Run("uses versioned tag outside test mode", func(t *testing.T) {
+		DefaultCLIConfig.OperatorImage = ""
+		t.Setenv("MCP_RUNTIME_TEST_MODE", "")
+		ext := &ExternalRegistryConfig{URL: "registry.example.com/"}
+		got := getOperatorImage(ext)
+		if got != "registry.example.com/mcp-runtime-operator:deadbeef" {
+			t.Fatalf("unexpected versioned image: %q", got)
 		}
 	})
 }
@@ -76,10 +88,15 @@ func TestGetOperatorImage(t *testing.T) {
 func TestGetGatewayProxyImage(t *testing.T) {
 	origOverride := DefaultCLIConfig.GatewayProxyImage
 	origKubectl := kubectlClient
+	origTagResolver := setupImageTagResolver
 	t.Cleanup(func() {
 		DefaultCLIConfig.GatewayProxyImage = origOverride
 		kubectlClient = origKubectl
+		setupImageTagResolver = origTagResolver
 	})
+
+	t.Setenv("MCP_RUNTIME_TEST_MODE", "1")
+	setupImageTagResolver = func() string { return "deadbeef" }
 
 	t.Run("uses override when set", func(t *testing.T) {
 		DefaultCLIConfig.GatewayProxyImage = "override/mcp-proxy:v1"
@@ -102,9 +119,6 @@ func TestGetGatewayProxyImage(t *testing.T) {
 		DefaultCLIConfig.GatewayProxyImage = ""
 		mock := &MockExecutor{
 			CommandFunc: func(spec ExecSpec) *MockCommand {
-				if contains(spec.Args, "jsonpath={.spec.clusterIP}") {
-					return &MockCommand{OutputData: []byte("10.0.0.1")}
-				}
 				if contains(spec.Args, "jsonpath={.spec.ports[0].port}") {
 					return &MockCommand{OutputData: []byte("5000")}
 				}
@@ -113,8 +127,18 @@ func TestGetGatewayProxyImage(t *testing.T) {
 		}
 		kubectlClient = &KubectlClient{exec: mock, validators: nil}
 		got := getGatewayProxyImage(nil)
-		if got != "10.0.0.1:5000/mcp-sentinel-mcp-proxy:latest" {
+		if got != "registry.registry.svc.cluster.local:5000/mcp-sentinel-mcp-proxy:latest" {
 			t.Fatalf("unexpected platform registry image: %q", got)
+		}
+	})
+
+	t.Run("uses versioned tag outside test mode", func(t *testing.T) {
+		DefaultCLIConfig.GatewayProxyImage = ""
+		t.Setenv("MCP_RUNTIME_TEST_MODE", "")
+		ext := &ExternalRegistryConfig{URL: "registry.example.com/"}
+		got := getGatewayProxyImage(ext)
+		if got != "registry.example.com/mcp-sentinel-mcp-proxy:deadbeef" {
+			t.Fatalf("unexpected versioned image: %q", got)
 		}
 	})
 }
@@ -216,6 +240,23 @@ func TestOperatorEnvOverrides(t *testing.T) {
 		}
 		if got[0].Value != "http://custom-analytics-ingest" {
 			t.Fatalf("expected custom ingest url, got %+v", got[0])
+		}
+	})
+
+	t.Run("includes registry endpoint and ingress host when configured", func(t *testing.T) {
+		DefaultCLIConfig = &CLIConfig{
+			RegistryEndpoint:    "10.43.39.164:5000",
+			RegistryIngressHost: "registry.local",
+		}
+		got := operatorEnvOverrides("")
+		if len(got) != 3 {
+			t.Fatalf("expected analytics plus registry env overrides, got %v", got)
+		}
+		if got[1].Name != "MCP_REGISTRY_ENDPOINT" || got[1].Value != "10.43.39.164:5000" {
+			t.Fatalf("unexpected registry endpoint env override: %+v", got[1])
+		}
+		if got[2].Name != "MCP_REGISTRY_INGRESS_HOST" || got[2].Value != "registry.local" {
+			t.Fatalf("unexpected registry ingress env override: %+v", got[2])
 		}
 	})
 }
@@ -615,6 +656,11 @@ func TestRenderAnalyticsSecretManifestGeneratesKeysWhenMissing(t *testing.T) {
 }
 
 func TestPrepareAnalyticsImagesUsesTestModeImageSet(t *testing.T) {
+	// setupImageTag() reads MCP_RUNTIME_TEST_MODE, not the boolean testMode argument,
+	// to decide between the "latest" tag and a git SHA. Opt into the test-mode tag
+	// here so the expected ":latest" image refs line up.
+	t.Setenv("MCP_RUNTIME_TEST_MODE", "1")
+
 	var buildCalls int32
 	var pushCalls int32
 	deps := SetupDeps{
@@ -1218,7 +1264,9 @@ func TestSetupTLSWithKubectl(t *testing.T) {
 		if commandHasArgs(cmd, "apply", "-f", "-") {
 			hasNamespace = true
 		}
-		if commandHasArgs(cmd, "apply", "-f", "config/cert-manager/example-registry-certificate.yaml") {
+		// Registry Certificate is applied via `kubectl apply -f - -n registry` with the
+		// manifest piped over stdin, not via `apply -f <path>`.
+		if commandHasArgs(cmd, "apply", "-f", "-", "-n", NamespaceRegistry) {
 			hasCert = true
 		}
 		if commandHasArgs(cmd, "wait", "--for=condition=Ready", "certificate/registry-cert", "-n", NamespaceRegistry, timeoutArg) {

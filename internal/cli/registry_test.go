@@ -930,6 +930,115 @@ func TestPushInCluster(t *testing.T) {
 			t.Error("expected delete to be called for cleanup")
 		}
 	})
+
+	t.Run("rewrites registry.local push target to service DNS", func(t *testing.T) {
+		origConfig := DefaultCLIConfig
+		t.Cleanup(func() { DefaultCLIConfig = origConfig })
+		DefaultCLIConfig = &CLIConfig{
+			RegistryEndpoint:    "registry.local",
+			RegistryIngressHost: "registry.local",
+			RegistryPort:        5000,
+		}
+
+		var skopeoTarget string
+		mock := &MockExecutor{
+			CommandFunc: func(spec ExecSpec) *MockCommand {
+				cmd := &MockCommand{Args: spec.Args}
+				if spec.Name == "kubectl" && contains(spec.Args, "jsonpath={.spec.ports[0].port}") {
+					cmd.OutputData = []byte("5000")
+				}
+				if spec.Name == "kubectl" && contains(spec.Args, "exec") {
+					for i, a := range spec.Args {
+						if strings.HasPrefix(a, "docker://") && skopeoTarget == "" {
+							skopeoTarget = a
+							_ = i
+						}
+					}
+				}
+				return cmd
+			},
+		}
+		kubectl := &KubectlClient{exec: mock, validators: nil}
+		mgr := NewRegistryManager(kubectl, mock, zap.NewNop())
+
+		var buf bytes.Buffer
+		setDefaultPrinterWriter(t, &buf)
+
+		if err := mgr.PushInCluster("source:tag", "registry.local/mcp-runtime-operator:c63dea8", "registry"); err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		want := "docker://registry.registry.svc.cluster.local:5000/mcp-runtime-operator:c63dea8"
+		if skopeoTarget != want {
+			t.Fatalf("expected skopeo target %q, got %q", want, skopeoTarget)
+		}
+	})
+}
+
+func TestRewriteTargetHostForInClusterPush(t *testing.T) {
+	origConfig := DefaultCLIConfig
+	t.Cleanup(func() { DefaultCLIConfig = origConfig })
+
+	cases := []struct {
+		name     string
+		endpoint string
+		ingress  string
+		target   string
+		wantHost string
+	}{
+		{
+			name:     "rewrites ingress host",
+			endpoint: "registry.local",
+			ingress:  "registry.local",
+			target:   "registry.local/foo:tag",
+			wantHost: "registry.registry.svc.cluster.local:5000",
+		},
+		{
+			name:     "rewrites ingress host with port",
+			endpoint: "registry.local:5000",
+			ingress:  "registry.local",
+			target:   "registry.local:5000/foo:tag",
+			wantHost: "registry.registry.svc.cluster.local:5000",
+		},
+		{
+			name:     "leaves svc dns target unchanged",
+			endpoint: "registry.local",
+			ingress:  "registry.local",
+			target:   "registry.registry.svc.cluster.local:5000/foo:tag",
+			wantHost: "registry.registry.svc.cluster.local:5000",
+		},
+		{
+			name:     "leaves unrelated registry unchanged",
+			endpoint: "registry.local",
+			ingress:  "registry.local",
+			target:   "ghcr.io/owner/foo:tag",
+			wantHost: "ghcr.io",
+		},
+		{
+			name:     "rewrites configured endpoint host",
+			endpoint: "internal-registry.example.com",
+			ingress:  "registry.prod.example.com",
+			target:   "internal-registry.example.com/foo:tag",
+			wantHost: "registry.registry.svc.cluster.local:5000",
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			DefaultCLIConfig = &CLIConfig{
+				RegistryEndpoint:    tc.endpoint,
+				RegistryIngressHost: tc.ingress,
+				RegistryPort:        5000,
+			}
+			got := rewriteTargetHostForInClusterPush(tc.target, nil)
+			slash := strings.Index(got, "/")
+			if slash < 0 {
+				t.Fatalf("unexpected result without path: %q", got)
+			}
+			if got[:slash] != tc.wantHost {
+				t.Fatalf("expected host %q, got %q (full: %q)", tc.wantHost, got[:slash], got)
+			}
+		})
+	}
 }
 
 func TestSaveExternalRegistryConfigErrors(t *testing.T) {
@@ -1044,8 +1153,11 @@ func TestDeployRegistry(t *testing.T) {
 
 	t.Run("applies image override via rendered manifest", func(t *testing.T) {
 		origKubectl := kubectlClient
+		origConfig := DefaultCLIConfig
 		t.Cleanup(func() { kubectlClient = origKubectl })
+		t.Cleanup(func() { DefaultCLIConfig = origConfig })
 		t.Setenv(registryImageOverrideEnv, "docker.io/library/mcp-runtime-registry:latest")
+		DefaultCLIConfig = &CLIConfig{RegistryEndpoint: "10.43.39.164:5000", RegistryIngressHost: "registry.prod.example.com"}
 
 		var applyCmd *MockCommand
 		mock := &MockExecutor{
@@ -1098,6 +1210,17 @@ spec:
 		}
 	})
 
+	t.Run("rewrites registry host in rendered manifest", func(t *testing.T) {
+		manifest := "spec:\n  tls:\n  - hosts:\n    - registry.local\n"
+		got := rewriteRegistryHost(manifest, "registry.prod.example.com")
+		if !strings.Contains(got, "registry.prod.example.com") {
+			t.Fatalf("expected rewritten registry host, got: %s", got)
+		}
+		if strings.Contains(got, "registry.local") {
+			t.Fatalf("expected registry.local to be replaced, got: %s", got)
+		}
+	})
+
 	t.Run("rejects unsupported registry type", func(t *testing.T) {
 		origKubectl := kubectlClient
 		t.Cleanup(func() { kubectlClient = origKubectl })
@@ -1131,12 +1254,19 @@ spec:
 		origKubectl := kubectlClient
 		t.Cleanup(func() { kubectlClient = origKubectl })
 
-		callCount := 0
 		mock := &MockExecutor{
 			CommandFunc: func(spec ExecSpec) *MockCommand {
-				callCount++
 				cmd := &MockCommand{Args: spec.Args}
-				if contains(spec.Args, "apply") && contains(spec.Args, "-k") {
+				switch {
+				case contains(spec.Args, "kustomize"):
+					cmd.OutputData = []byte("apiVersion: v1\nkind: ConfigMap\nmetadata:\n  name: registry\n")
+					cmd.RunFunc = func() error {
+						if cmd.StdoutW != nil {
+							_, _ = cmd.StdoutW.Write(cmd.OutputData)
+						}
+						return nil
+					}
+				case contains(spec.Args, "apply") && contains(spec.Args, "-f") && contains(spec.Args, "-"):
 					cmd.RunErr = errors.New("apply failed")
 				}
 				return cmd

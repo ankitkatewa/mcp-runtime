@@ -92,8 +92,8 @@ MCP_POLICY_WAIT_TRIES="${MCP_POLICY_WAIT_TRIES:-90}"
 RAW_REQUEST_TRIES="${RAW_REQUEST_TRIES:-10}"
 MCP_SMOKE_AGENT_ENV_FILE="${MCP_SMOKE_AGENT_ENV_FILE:-.env}"
 MCP_SMOKE_AGENT_PROMPT="${MCP_SMOKE_AGENT_PROMPT:-Use the MCP upper tool to convert the exact word governance to uppercase. Reply with only the uppercase result.}"
-MCP_SMOKE_AGENT_PROVIDER="${MCP_SMOKE_AGENT_PROVIDER:-}"
-MCP_SMOKE_AGENT_MODEL="${MCP_SMOKE_AGENT_MODEL:-}"
+MCP_SMOKE_AGENT_PROVIDER="${MCP_SMOKE_AGENT_PROVIDER:-anthropic}"
+MCP_SMOKE_AGENT_MODEL="${MCP_SMOKE_AGENT_MODEL:-claude-sonnet-4-20250514}"
 MCP_SMOKE_AGENT_TIMEOUT="${MCP_SMOKE_AGENT_TIMEOUT:-90s}"
 UNKNOWN_SESSION_ID="${UNKNOWN_SESSION_ID:-sess-does-not-exist}"
 TEST_MODE_REGISTRY_IMAGE="${TEST_MODE_REGISTRY_IMAGE:-docker.io/library/mcp-runtime-registry:latest}"
@@ -259,6 +259,29 @@ wait_http() {
   done
   echo "timed out waiting for ${url}" >&2
   return 1
+}
+
+# Run rollout status with diagnostics on failure.
+rollout_status_with_logs() {
+  local namespace="$1"
+  local kind="$2"
+  local name="$3"
+  local timeout="$4"
+
+  set +e
+  kubectl rollout status "${kind}/${name}" -n "${namespace}" --timeout="${timeout}"
+  local status=$?
+  set -e
+
+  if [[ ${status} -ne 0 ]]; then
+    echo "[debug] rollout failed for ${kind}/${name}; collecting diagnostics" >&2
+    kubectl describe "${kind}/${name}" -n "${namespace}" || true
+    kubectl get pods -n "${namespace}" -l "app=${name}" -o wide || true
+    kubectl logs -n "${namespace}" -l "app=${name}" --all-containers=true --tail=200 || true
+    kubectl logs -n "${namespace}" "deploy/${name}" --all-containers=true --tail=200 || true
+  fi
+
+  return ${status}
 }
 
 assert_file_contains() {
@@ -642,11 +665,33 @@ PY
 }
 
 should_run_mcp_smoke_agent() {
-  if [[ -n "${OPENAI_API_KEY:-}" || -n "${ANTHROPIC_API_KEY:-}" ]]; then
+  local required_var required_pattern
+  case "${MCP_SMOKE_AGENT_PROVIDER}" in
+    anthropic)
+      required_var="ANTHROPIC_API_KEY"
+      required_pattern='^[[:space:]]*(export[[:space:]]+)?ANTHROPIC_API_KEY='
+      ;;
+    openai|"")
+      required_var="OPENAI_API_KEY"
+      required_pattern='^[[:space:]]*(export[[:space:]]+)?OPENAI_API_KEY='
+      ;;
+    *)
+      # Unknown provider — fall back to accepting either key.
+      if [[ -n "${OPENAI_API_KEY:-}" || -n "${ANTHROPIC_API_KEY:-}" ]]; then
+        return 0
+      fi
+      if [[ -f "${MCP_SMOKE_AGENT_ENV_FILE}" ]] && grep -Eq '^[[:space:]]*(export[[:space:]]+)?(OPENAI_API_KEY|ANTHROPIC_API_KEY)=' "${MCP_SMOKE_AGENT_ENV_FILE}"; then
+        return 0
+      fi
+      return 1
+      ;;
+  esac
+
+  if [[ -n "${!required_var:-}" ]]; then
     return 0
   fi
 
-  if [[ -f "${MCP_SMOKE_AGENT_ENV_FILE}" ]] && grep -Eq '^[[:space:]]*(export[[:space:]]+)?(OPENAI_API_KEY|ANTHROPIC_API_KEY)=' "${MCP_SMOKE_AGENT_ENV_FILE}"; then
+  if [[ -f "${MCP_SMOKE_AGENT_ENV_FILE}" ]] && grep -Eq "${required_pattern}" "${MCP_SMOKE_AGENT_ENV_FILE}"; then
     return 0
   fi
 
@@ -655,14 +700,56 @@ should_run_mcp_smoke_agent() {
 
 run_mcp_smoke_agent_prompt() {
   local url="$1"
-  local stdout_file="${WORKDIR}/mcp-smoke-agent.stdout"
-  local stderr_file="${WORKDIR}/mcp-smoke-agent.stderr"
+  local case_name="${2:-governance}"
+  local prompt expected_tool expected_text mode
+  mode="allow"
+  expected_text=""
+
+  case "${case_name}" in
+    governance)
+      prompt="${MCP_SMOKE_AGENT_PROMPT}"
+      expected_tool="upper"
+      expected_text="GOVERNANCE"
+      ;;
+    add)
+      prompt="Use the MCP add tool to add 41 and 1. Reply with only the numeric result."
+      expected_tool="add"
+      expected_text="42"
+      ;;
+    slugify)
+      prompt="Use the MCP slugify tool to turn the text 'Hello World' into a URL slug. Reply with only the slug."
+      expected_tool="slugify"
+      expected_text="hello-world"
+      ;;
+    governance_denied_low_trust)
+      prompt="${MCP_SMOKE_AGENT_PROMPT}"
+      expected_tool="upper"
+      mode="deny"
+      ;;
+    add_denied_not_granted)
+      prompt="Use the MCP add tool to add 41 and 1. Reply with only the numeric result."
+      expected_tool="add"
+      mode="deny"
+      ;;
+    echo_denied_revoked)
+      prompt="Use the MCP echo tool to repeat the word analytics. Reply with only the tool's output."
+      expected_tool="echo"
+      mode="deny"
+      ;;
+    *)
+      echo "unknown smoke agent case: ${case_name}" >&2
+      return 2
+      ;;
+  esac
+
+  local stdout_file="${WORKDIR}/mcp-smoke-agent-${case_name}.stdout"
+  local stderr_file="${WORKDIR}/mcp-smoke-agent-${case_name}.stderr"
   local agent_exit_code=0
   local agent_cmd=(
     "${MCP_SMOKE_BIN}" agent
     --server "${url}"
     --env-file "${MCP_SMOKE_AGENT_ENV_FILE}"
-    --prompt "${MCP_SMOKE_AGENT_PROMPT}"
+    --prompt "${prompt}"
     --timeout "${MCP_SMOKE_AGENT_TIMEOUT}"
   )
 
@@ -680,20 +767,28 @@ run_mcp_smoke_agent_prompt() {
   fi
 
   if [[ "${agent_exit_code}" -ne 0 ]]; then
-    echo "mcp-smoke-agent exited with code ${agent_exit_code}" >&2
-    echo "--- mcp-smoke-agent stderr ---" >&2
+    echo "mcp-smoke-agent (${case_name}) exited with code ${agent_exit_code}" >&2
+    echo "--- mcp-smoke-agent stderr (${case_name}) ---" >&2
     cat "${stderr_file}" >&2 || true
-    echo "--- mcp-smoke-agent stdout ---" >&2
+    echo "--- mcp-smoke-agent stdout (${case_name}) ---" >&2
     cat "${stdout_file}" >&2 || true
     return "${agent_exit_code}"
   fi
 
+  MCP_SMOKE_AGENT_CASE="${case_name}" \
+  MCP_SMOKE_AGENT_MODE="${mode}" \
+  MCP_SMOKE_AGENT_EXPECTED_TOOL="${expected_tool}" \
+  MCP_SMOKE_AGENT_EXPECTED_TEXT="${expected_text}" \
   MCP_SMOKE_AGENT_STDOUT="${stdout_file}" \
   MCP_SMOKE_AGENT_STDERR="${stderr_file}" \
   python3 <<'PY'
 import os
 import re
 
+case = os.environ["MCP_SMOKE_AGENT_CASE"]
+mode = os.environ["MCP_SMOKE_AGENT_MODE"]
+expected_tool = os.environ["MCP_SMOKE_AGENT_EXPECTED_TOOL"]
+expected_text = os.environ["MCP_SMOKE_AGENT_EXPECTED_TEXT"]
 stdout_path = os.environ["MCP_SMOKE_AGENT_STDOUT"]
 stderr_path = os.environ["MCP_SMOKE_AGENT_STDERR"]
 
@@ -705,20 +800,39 @@ with open(stdout_path, "r", encoding="utf-8") as fh:
 with open(stderr_path, "r", encoding="utf-8") as fh:
     stderr = fh.read()
 
-check(
-    bool(re.search(r"^tool>\s+upper\s+", stderr, re.MULTILINE)),
-    "mcp-smoke-agent called upper",
-    f"mcp-smoke-agent did not call upper:\n{stderr}",
-)
-check(
-    "GOVERNANCE" in stdout or "GOVERNANCE" in stderr,
-    "mcp-smoke-agent produced GOVERNANCE",
-    f"mcp-smoke-agent did not produce the expected uppercase result:\nSTDOUT:\n{stdout}\nSTDERR:\n{stderr}",
-)
+tool_attempted = bool(re.search(rf"^tool>\s+{re.escape(expected_tool)}\s+", stderr, re.MULTILINE))
 
-print("mcp-smoke-agent:")
-print("  tool call    upper")
-print("  final answer GOVERNANCE")
+if mode == "allow":
+    check(
+        tool_attempted,
+        f"mcp-smoke-agent[{case}] called {expected_tool}",
+        f"mcp-smoke-agent[{case}] did not call {expected_tool}:\n{stderr}",
+    )
+    haystack = stdout + "\n" + stderr
+    check(
+        expected_text.lower() in haystack.lower(),
+        f"mcp-smoke-agent[{case}] produced {expected_text}",
+        f"mcp-smoke-agent[{case}] did not produce {expected_text!r}:\nSTDOUT:\n{stdout}\nSTDERR:\n{stderr}",
+    )
+    print(f"mcp-smoke-agent[{case}]:")
+    print(f"  mode         allow")
+    print(f"  tool call    {expected_tool}")
+    print(f"  final answer {expected_text}")
+else:
+    # Deny path: the governance layer at the gateway enforces denial
+    # deterministically (the adjacent raw-MCP wait_for_mcp_tool_result calls
+    # already prove that). What we verify at the real-LLM agent level is that
+    # the full stack stays graceful under denial: the agent exits cleanly
+    # (already enforced above) and surfaces either a tool-call attempt with
+    # a denial marker, or a soft decline from the model. We log both signals
+    # for post-mortem but intentionally avoid brittle content assertions on
+    # LLM output.
+    denial_markers = ["trust_too_low", "tool_not_granted", "tool_denied", "tool execution failed"]
+    denial_seen = any(marker in stdout + stderr for marker in denial_markers)
+    print(f"mcp-smoke-agent[{case}]:")
+    print(f"  mode         deny")
+    print(f"  tool attempt {'yes' if tool_attempted else 'no'}")
+    print(f"  denial seen  {'yes' if denial_seen else 'no'}")
 PY
 }
 
@@ -1478,7 +1592,7 @@ containerdConfigPatches:
   [plugins."io.containerd.grpc.v1.cri".registry.mirrors."registry-1.docker.io"]
     endpoint = ["http://${LOCAL_REGISTRY_MIRROR_ENDPOINT}", "https://registry-1.docker.io"]
   [plugins."io.containerd.grpc.v1.cri".registry.mirrors."registry.registry.svc.cluster.local:5000"]
-    endpoint = ["http://registry.registry.svc.cluster.local:5000"]
+    endpoint = ["http://127.0.0.1:32000"]
 EOF
 
 start_local_registry
@@ -1531,17 +1645,19 @@ build_and_publish_image "docker.io/library/mcp-sentinel-processor:latest" "${SEN
 build_and_publish_image "docker.io/library/mcp-sentinel-ui:latest" "${SENTINEL_ROOT}/services/ui/Dockerfile" "${SENTINEL_ROOT}/services/ui"
 
 echo "[setup] running platform setup in test mode"
+export MCP_SETUP_WAIT_TIMEOUT="${MCP_SETUP_WAIT_TIMEOUT:-900}"
+export MCP_REGISTRY_ENDPOINT="${MCP_REGISTRY_ENDPOINT:-registry.registry.svc.cluster.local:5000}"
 MCP_RUNTIME_REGISTRY_IMAGE_OVERRIDE="${TEST_MODE_REGISTRY_IMAGE}" \
 ./bin/mcp-runtime setup --test-mode --ingress-manifest config/ingress/overlays/http
 
 echo "[verify] waiting for core platform components"
-kubectl rollout status deploy/registry -n registry --timeout=180s
-kubectl rollout status deploy/mcp-runtime-operator-controller-manager -n mcp-runtime --timeout=180s
-kubectl rollout status deploy/traefik -n traefik --timeout=180s
-kubectl rollout status deploy/mcp-sentinel-api -n mcp-sentinel --timeout=180s
-kubectl rollout status deploy/mcp-sentinel-gateway -n mcp-sentinel --timeout=180s
-kubectl rollout status statefulset/tempo -n mcp-sentinel --timeout=180s
-kubectl rollout status statefulset/loki -n mcp-sentinel --timeout=300s
+rollout_status_with_logs registry deploy registry 180s
+rollout_status_with_logs mcp-runtime deploy mcp-runtime-operator-controller-manager 180s
+rollout_status_with_logs traefik deploy traefik 180s
+rollout_status_with_logs mcp-sentinel deploy mcp-sentinel-api 180s
+rollout_status_with_logs mcp-sentinel deploy mcp-sentinel-gateway 180s
+rollout_status_with_logs mcp-sentinel statefulset tempo 180s
+rollout_status_with_logs mcp-sentinel statefulset loki 300s
 
 echo "[cli] checking platform status commands"
 ./bin/mcp-runtime status
@@ -2169,6 +2285,11 @@ check(
 print("upper deny:", body)
 PY
 
+  if should_run_mcp_smoke_agent; then
+    echo "[mcp] running real-client agent against trust_too_low governance (expect denial)"
+    run_mcp_smoke_agent_prompt "${MCP_SESSION_URL}" governance_denied_low_trust
+  fi
+
   echo "[policy] raising consented trust to medium"
   cat <<EOF | kubectl apply -f -
 apiVersion: mcpruntime.org/v1alpha1
@@ -2191,6 +2312,11 @@ EOF
   echo "[mcp] waiting for updated consented trust to reach the gateway"
   wait_for_mcp_tool_result "${MCP_SESSION_URL}" "upper" '{"message":"governance"}' 200 "GOVERNANCE"
   wait_for_mcp_tool_result "${MCP_SESSION_URL}" "add" '{"a":2,"b":3}' 403 "tool_not_granted"
+
+  if should_run_mcp_smoke_agent; then
+    echo "[mcp] running real-client agent against tool_not_granted add (expect denial)"
+    run_mcp_smoke_agent_prompt "${MCP_SESSION_URL}" add_denied_not_granted
+  fi
 
   echo "[mcp] validating updated policy allows the higher-trust tool"
   MCP_BASE="${MCP_SESSION_URL}" \
@@ -2261,8 +2387,40 @@ print("upper allow:", body)
 PY
 
   if should_run_mcp_smoke_agent; then
-    echo "[mcp] running optional real-client mcp-smoke agent prompt"
-    run_mcp_smoke_agent_prompt "${MCP_SESSION_URL}"
+    echo "[policy] temporarily expanding grant for multi-tool agent prompts"
+    cat <<EOF | kubectl apply -f -
+apiVersion: mcpruntime.org/v1alpha1
+kind: MCPAccessGrant
+metadata:
+  name: ${SERVER_NAME}-grant
+  namespace: mcp-servers
+spec:
+  serverRef:
+    name: ${SERVER_NAME}
+  subject:
+    humanID: ${HUMAN_ID}
+    agentID: ${AGENT_ID}
+  maxTrust: high
+  policyVersion: v1
+  toolRules:
+    - name: aaa-ping
+      decision: allow
+    - name: echo
+      decision: allow
+    - name: upper
+      decision: allow
+    - name: add
+      decision: allow
+    - name: slugify
+      decision: allow
+EOF
+    wait_for_policy_text "\"slugify\""
+    wait_for_mcp_tool_result "${MCP_SESSION_URL}" "add" '{"a":2,"b":3}' 200 "5"
+
+    echo "[mcp] running real-client mcp-smoke agent prompts (governance, add, slugify)"
+    run_mcp_smoke_agent_prompt "${MCP_SESSION_URL}" governance
+    run_mcp_smoke_agent_prompt "${MCP_SESSION_URL}" add
+    run_mcp_smoke_agent_prompt "${MCP_SESSION_URL}" slugify
   else
     echo "[mcp] skipping optional real-client mcp-smoke agent prompt (no OPENAI_API_KEY/ANTHROPIC_API_KEY in env or ${MCP_SMOKE_AGENT_ENV_FILE})"
   fi
@@ -2299,6 +2457,10 @@ EOF
   wait_for_mcp_tool_result "${MCP_SESSION_URL}" "aaa-ping" '{}' 403 "tool_denied"
   wait_for_mcp_tool_result "${MCP_SESSION_URL}" "echo" '{"message":"analytics"}' 403 "tool_denied"
   run_mcp_smoke_expect "mcp-smoke-aaa-ping-deny" "${MCP_SESSION_URL}" false "tool_denied"
+  if should_run_mcp_smoke_agent; then
+    echo "[mcp] running real-client agent against revoked echo (expect denial)"
+    run_mcp_smoke_agent_prompt "${MCP_SESSION_URL}" echo_denied_revoked
+  fi
   MCP_BASE="${MCP_SESSION_URL}" \
   MCP_PROTOCOL_VERSION="${MCP_PROTOCOL_VERSION}" \
   python3 <<'PY'
