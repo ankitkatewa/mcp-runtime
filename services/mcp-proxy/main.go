@@ -15,7 +15,6 @@ import (
 	"net/url"
 	"os"
 	"path"
-	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -29,6 +28,9 @@ import (
 	"go.opentelemetry.io/otel/sdk/resource"
 	sdktrace "go.opentelemetry.io/otel/sdk/trace"
 	semconv "go.opentelemetry.io/otel/semconv/v1.24.0"
+
+	policypkg "mcp-runtime/pkg/policy"
+	"mcp-runtime/pkg/serviceutil"
 )
 
 type analyticsEvent struct {
@@ -45,82 +47,6 @@ type rpcRequest struct {
 
 type toolParams struct {
 	Name string `json:"name"`
-}
-
-type gatewayPolicyDocument struct {
-	Server   gatewayPolicyServer    `json:"server"`
-	Auth     gatewayPolicyAuth      `json:"auth"`
-	Policy   gatewayPolicyConfig    `json:"policy"`
-	Session  gatewayPolicySession   `json:"session"`
-	Tools    []gatewayPolicyTool    `json:"tools,omitempty"`
-	Grants   []gatewayPolicyGrant   `json:"grants,omitempty"`
-	Sessions []gatewayPolicyBinding `json:"sessions,omitempty"`
-}
-
-type gatewayPolicyServer struct {
-	Name      string `json:"name"`
-	Namespace string `json:"namespace"`
-	Cluster   string `json:"cluster,omitempty"`
-}
-
-type gatewayPolicyAuth struct {
-	Mode            string `json:"mode,omitempty"`
-	HumanIDHeader   string `json:"human_id_header,omitempty"`
-	AgentIDHeader   string `json:"agent_id_header,omitempty"`
-	SessionIDHeader string `json:"session_id_header,omitempty"`
-	TokenHeader     string `json:"token_header,omitempty"`
-	IssuerURL       string `json:"issuer_url,omitempty"`
-	Audience        string `json:"audience,omitempty"`
-}
-
-type gatewayPolicyConfig struct {
-	Mode            string `json:"mode,omitempty"`
-	DefaultDecision string `json:"default_decision,omitempty"`
-	EnforceOn       string `json:"enforce_on,omitempty"`
-	PolicyVersion   string `json:"policy_version,omitempty"`
-}
-
-type gatewayPolicySession struct {
-	Required            bool   `json:"required,omitempty"`
-	Store               string `json:"store,omitempty"`
-	HeaderName          string `json:"header_name,omitempty"`
-	MaxLifetime         string `json:"max_lifetime,omitempty"`
-	IdleTimeout         string `json:"idle_timeout,omitempty"`
-	UpstreamTokenHeader string `json:"upstream_token_header,omitempty"`
-}
-
-type gatewayPolicyTool struct {
-	Name          string            `json:"name"`
-	Description   string            `json:"description,omitempty"`
-	RequiredTrust string            `json:"required_trust,omitempty"`
-	Labels        map[string]string `json:"labels,omitempty"`
-}
-
-type gatewayPolicyGrant struct {
-	Name          string              `json:"name"`
-	HumanID       string              `json:"human_id,omitempty"`
-	AgentID       string              `json:"agent_id,omitempty"`
-	MaxTrust      string              `json:"max_trust,omitempty"`
-	PolicyVersion string              `json:"policy_version,omitempty"`
-	Disabled      bool                `json:"disabled,omitempty"`
-	ToolRules     []gatewayToolAccess `json:"tool_rules,omitempty"`
-}
-
-type gatewayPolicyBinding struct {
-	Name             string `json:"name"`
-	HumanID          string `json:"human_id,omitempty"`
-	AgentID          string `json:"agent_id,omitempty"`
-	ConsentedTrust   string `json:"consented_trust,omitempty"`
-	Revoked          bool   `json:"revoked,omitempty"`
-	ExpiresAt        string `json:"expires_at,omitempty"`
-	PolicyVersion    string `json:"policy_version,omitempty"`
-	UpstreamTokenRef string `json:"upstream_token_ref,omitempty"`
-}
-
-type gatewayToolAccess struct {
-	Name          string `json:"name"`
-	Decision      string `json:"decision,omitempty"`
-	RequiredTrust string `json:"required_trust,omitempty"`
 }
 
 type identityContext struct {
@@ -141,7 +67,7 @@ type authzDecision struct {
 }
 
 type policySnapshot struct {
-	Policy *gatewayPolicyDocument
+	Policy *policypkg.Document
 	Err    error
 }
 
@@ -219,12 +145,12 @@ const (
 // main initializes and starts the MCP Proxy service.
 // It acts as a reverse proxy for MCP servers while enforcing simple policy and capturing analytics.
 func main() {
-	port := envOr("PORT", "8091")
-	upstream := envOr("UPSTREAM_URL", "http://127.0.0.1:8090")
+	port := serviceutil.EnvOr("PORT", "8091")
+	upstream := serviceutil.EnvOr("UPSTREAM_URL", "http://127.0.0.1:8090")
 	analyticsURL := strings.TrimSpace(os.Getenv("ANALYTICS_INGEST_URL"))
 	apiKey := strings.TrimSpace(os.Getenv("ANALYTICS_API_KEY"))
-	source := envOr("ANALYTICS_SOURCE", "mcp-proxy")
-	eventType := envOr("ANALYTICS_EVENT_TYPE", "mcp.request")
+	source := serviceutil.EnvOr("ANALYTICS_SOURCE", "mcp-proxy")
+	eventType := serviceutil.EnvOr("ANALYTICS_EVENT_TYPE", "mcp.request")
 	stripPrefix := strings.TrimSpace(os.Getenv("STRIP_PREFIX"))
 	externalBaseURL, err := parseExternalBaseURL(strings.TrimSpace(os.Getenv("EXTERNAL_BASE_URL")))
 	if err != nil {
@@ -267,12 +193,12 @@ func main() {
 		serverName:            strings.TrimSpace(os.Getenv("MCP_SERVER_NAME")),
 		serverNamespace:       strings.TrimSpace(os.Getenv("MCP_SERVER_NAMESPACE")),
 		clusterName:           strings.TrimSpace(os.Getenv("MCP_CLUSTER_NAME")),
-		defaultHumanHeader:    envOr("HUMAN_ID_HEADER", defaultHumanHeader),
-		defaultAgentHeader:    envOr("AGENT_ID_HEADER", defaultAgentHeader),
-		defaultSessionHeader:  envOr("SESSION_ID_HEADER", defaultSessionHeader),
-		defaultPolicyMode:     envOr("POLICY_MODE", defaultPolicyMode),
-		defaultPolicyDecision: envOr("POLICY_DEFAULT_DECISION", defaultPolicyDecision),
-		defaultPolicyVersion:  envOr("POLICY_VERSION", defaultPolicyVersion),
+		defaultHumanHeader:    serviceutil.EnvOr("HUMAN_ID_HEADER", defaultHumanHeader),
+		defaultAgentHeader:    serviceutil.EnvOr("AGENT_ID_HEADER", defaultAgentHeader),
+		defaultSessionHeader:  serviceutil.EnvOr("SESSION_ID_HEADER", defaultSessionHeader),
+		defaultPolicyMode:     serviceutil.EnvOr("POLICY_MODE", defaultPolicyMode),
+		defaultPolicyDecision: serviceutil.EnvOr("POLICY_DEFAULT_DECISION", defaultPolicyDecision),
+		defaultPolicyVersion:  serviceutil.EnvOr("POLICY_VERSION", defaultPolicyVersion),
 		oauthProviders:        map[string]*oauthProvider{},
 	}
 	if err := srv.startPolicyCache(); err != nil {
@@ -350,14 +276,14 @@ func (s *proxyServer) handleProxy(w http.ResponseWriter, r *http.Request) {
 		Identity: authCtx,
 	}
 
-	if policyUsesOAuth(policy) {
+	if policypkg.PolicyUsesOAuth(policy) {
 		oauthResult = s.authenticateOAuth(r, policy)
 		authCtx = oauthResult.Identity
 		if !oauthResult.Allowed {
 			decision = deny(
 				oauthResult.Status,
 				oauthResult.Reason,
-				choosePolicyVersion(policyVersion(policy), s.defaultPolicyVersion),
+				policypkg.ChoosePolicyVersion(policypkg.PolicyVersion(policy), s.defaultPolicyVersion),
 			)
 			s.writeDeniedResponse(recorder, r, originalPath, rpcMethod, toolName, authCtx, policy, decision, start)
 			return
@@ -370,13 +296,13 @@ func (s *proxyServer) handleProxy(w http.ResponseWriter, r *http.Request) {
 			decision = deny(
 				http.StatusServiceUnavailable,
 				"policy_unavailable",
-				choosePolicyVersion(policyVersion(policy), s.defaultPolicyVersion),
+				policypkg.ChoosePolicyVersion(policypkg.PolicyVersion(policy), s.defaultPolicyVersion),
 			)
 		case inspection.Indeterminate:
 			decision = deny(
 				http.StatusForbidden,
-				firstNonEmpty(inspection.FailureReason, "rpc_inspection_failed"),
-				choosePolicyVersion(policyVersion(policy), s.defaultPolicyVersion),
+				policypkg.FirstNonEmpty(inspection.FailureReason, "rpc_inspection_failed"),
+				policypkg.ChoosePolicyVersion(policypkg.PolicyVersion(policy), s.defaultPolicyVersion),
 			)
 		default:
 			decision = authorizeRequest(policy, authCtx, rpcMethod, toolName)
@@ -434,7 +360,7 @@ func (s *proxyServer) writeDeniedResponse(
 	r *http.Request,
 	originalPath, rpcMethod, toolName string,
 	authCtx identityContext,
-	policy *gatewayPolicyDocument,
+	policy *policypkg.Document,
 	decision authzDecision,
 	start time.Time,
 ) {
@@ -467,7 +393,7 @@ func (s *proxyServer) auditPayload(
 	r *http.Request,
 	path, rpcMethod, toolName string,
 	authCtx identityContext,
-	policy *gatewayPolicyDocument,
+	policy *policypkg.Document,
 	decision authzDecision,
 	status int,
 	latencyMs int64,
@@ -480,15 +406,15 @@ func (s *proxyServer) auditPayload(
 		"latency_ms":     latencyMs,
 		"bytes_in":       maxInt64(r.ContentLength, 0),
 		"bytes_out":      bytesOut,
-		"server":         firstNonEmpty(policyServerName(policy), s.serverName),
-		"namespace":      firstNonEmpty(policyServerNamespace(policy), s.serverNamespace),
-		"cluster":        firstNonEmpty(policyServerCluster(policy), s.clusterName),
+		"server":         policypkg.FirstNonEmpty(policypkg.PolicyServerName(policy), s.serverName),
+		"namespace":      policypkg.FirstNonEmpty(policypkg.PolicyServerNamespace(policy), s.serverNamespace),
+		"cluster":        policypkg.FirstNonEmpty(policypkg.PolicyServerCluster(policy), s.clusterName),
 		"human_id":       authCtx.HumanID,
 		"agent_id":       authCtx.AgentID,
 		"session_id":     authCtx.SessionID,
 		"decision":       ternary(decision.Allowed, "allow", "deny"),
 		"reason":         decision.Reason,
-		"policy_version": firstNonEmpty(decision.PolicyVersion, s.defaultPolicyVersion),
+		"policy_version": policypkg.FirstNonEmpty(decision.PolicyVersion, s.defaultPolicyVersion),
 	}
 	if rpcMethod != "" {
 		payload["rpc_method"] = rpcMethod
@@ -548,7 +474,7 @@ func (s *proxyServer) reloadPolicy() error {
 	return nil
 }
 
-func (s *proxyServer) currentPolicy() (*gatewayPolicyDocument, error) {
+func (s *proxyServer) currentPolicy() (*policypkg.Document, error) {
 	snapshot := s.loadPolicySnapshot()
 	if snapshot.Policy == nil {
 		return s.defaultPolicyDocument(), snapshot.Err
@@ -567,8 +493,8 @@ func (s *proxyServer) snapshotPolicy(snapshot policySnapshot) {
 	s.policyState.Store(snapshot)
 }
 
-func (s *proxyServer) loadPolicy() (*gatewayPolicyDocument, error) {
-	doc := &gatewayPolicyDocument{}
+func (s *proxyServer) loadPolicy() (*policypkg.Document, error) {
+	doc := &policypkg.Document{}
 	if s.policyFile != "" {
 		data, err := os.ReadFile(s.policyFile)
 		if err != nil {
@@ -616,7 +542,7 @@ func (s *proxyServer) loadPolicy() (*gatewayPolicyDocument, error) {
 	return doc, nil
 }
 
-func (s *proxyServer) extractIdentity(r *http.Request, policy *gatewayPolicyDocument) identityContext {
+func (s *proxyServer) extractIdentity(r *http.Request, policy *policypkg.Document) identityContext {
 	humanHeader, agentHeader, sessionHeader := s.identityHeaderNames(policy)
 	return identityContext{
 		HumanID:   strings.TrimSpace(r.Header.Get(humanHeader)),
@@ -625,21 +551,21 @@ func (s *proxyServer) extractIdentity(r *http.Request, policy *gatewayPolicyDocu
 	}
 }
 
-func (s *proxyServer) defaultPolicyDocument() *gatewayPolicyDocument {
-	return &gatewayPolicyDocument{
-		Server: gatewayPolicyServer{
+func (s *proxyServer) defaultPolicyDocument() *policypkg.Document {
+	return &policypkg.Document{
+		Server: policypkg.Server{
 			Name:      s.serverName,
 			Namespace: s.serverNamespace,
 			Cluster:   s.clusterName,
 		},
-		Auth: gatewayPolicyAuth{
+		Auth: &policypkg.Auth{
 			Mode:            "header",
 			HumanIDHeader:   s.defaultHumanHeader,
 			AgentIDHeader:   s.defaultAgentHeader,
 			SessionIDHeader: s.defaultSessionHeader,
 			TokenHeader:     defaultTokenHeader,
 		},
-		Policy: gatewayPolicyConfig{
+		Policy: &policypkg.Config{
 			Mode:            s.defaultPolicyMode,
 			DefaultDecision: s.defaultPolicyDecision,
 			PolicyVersion:   s.defaultPolicyVersion,
@@ -647,11 +573,11 @@ func (s *proxyServer) defaultPolicyDocument() *gatewayPolicyDocument {
 	}
 }
 
-func (s *proxyServer) handleOAuthProtectedResource(w http.ResponseWriter, r *http.Request, policy *gatewayPolicyDocument) bool {
+func (s *proxyServer) handleOAuthProtectedResource(w http.ResponseWriter, r *http.Request, policy *policypkg.Document) bool {
 	if !isOAuthProtectedMetadataPath(r.URL.Path) {
 		return false
 	}
-	if !policyUsesOAuth(policy) {
+	if !policypkg.PolicyUsesOAuth(policy) {
 		http.NotFound(w, r)
 		return true
 	}
@@ -676,16 +602,24 @@ func (s *proxyServer) handleOAuthProtectedResource(w http.ResponseWriter, r *htt
 	return true
 }
 
-func (s *proxyServer) authenticateOAuth(r *http.Request, policy *gatewayPolicyDocument) oauthAuthResult {
+func (s *proxyServer) authenticateOAuth(r *http.Request, policy *policypkg.Document) oauthAuthResult {
 	headerIdentity := s.extractIdentity(r, policy)
 	result := oauthAuthResult{
 		Allowed:  true,
 		Status:   http.StatusOK,
 		Identity: identityContext{SessionID: headerIdentity.SessionID},
 	}
-	if !policyUsesOAuth(policy) {
+	if !policypkg.PolicyUsesOAuth(policy) {
 		result.Identity = headerIdentity
 		return result
+	}
+
+	if policy.Auth == nil {
+		return oauthAuthResult{
+			Status:   http.StatusServiceUnavailable,
+			Reason:   "oauth_config_missing",
+			Identity: result.Identity,
+		}
 	}
 
 	issuerURL := strings.TrimSpace(policy.Auth.IssuerURL)
@@ -734,7 +668,7 @@ func (s *proxyServer) authenticateOAuth(r *http.Request, policy *gatewayPolicyDo
 			Identity: result.Identity,
 		}
 	}
-	if audience := strings.TrimSpace(policy.Auth.Audience); audience != "" && !audienceMatches(claims["aud"], audience) {
+	if audience := strings.TrimSpace(policy.Auth.Audience); audience != "" && !serviceutil.AudienceMatches(claims["aud"], audience) {
 		return oauthAuthResult{
 			Status:   http.StatusUnauthorized,
 			Reason:   "invalid_token",
@@ -748,8 +682,8 @@ func (s *proxyServer) authenticateOAuth(r *http.Request, policy *gatewayPolicyDo
 		Token:   token,
 		Identity: identityContext{
 			HumanID:   stringClaim(claims, "sub"),
-			AgentID:   firstNonEmpty(stringClaim(claims, "azp"), stringClaim(claims, "client_id")),
-			SessionID: firstNonEmpty(stringClaim(claims, "sid"), headerIdentity.SessionID),
+			AgentID:   policypkg.FirstNonEmpty(stringClaim(claims, "azp"), stringClaim(claims, "client_id")),
+			SessionID: policypkg.FirstNonEmpty(stringClaim(claims, "sid"), headerIdentity.SessionID),
 		},
 	}
 }
@@ -827,7 +761,7 @@ func (s *proxyServer) fetchAuthServerMetadata(ctx context.Context, issuerURL str
 	return nil, lastErr
 }
 
-func (s *proxyServer) applyIdentityHeaders(r *http.Request, policy *gatewayPolicyDocument, identity identityContext) {
+func (s *proxyServer) applyIdentityHeaders(r *http.Request, policy *policypkg.Document, identity identityContext) {
 	humanHeader, agentHeader, sessionHeader := s.identityHeaderNames(policy)
 	if humanHeader != "" {
 		r.Header.Del(humanHeader)
@@ -849,8 +783,8 @@ func (s *proxyServer) applyIdentityHeaders(r *http.Request, policy *gatewayPolic
 	}
 }
 
-func (s *proxyServer) applyUpstreamToken(r *http.Request, policy *gatewayPolicyDocument, token string) {
-	if policy == nil {
+func (s *proxyServer) applyUpstreamToken(r *http.Request, policy *policypkg.Document, token string) {
+	if policy == nil || policy.Session == nil {
 		return
 	}
 	headerName := strings.TrimSpace(policy.Session.UpstreamTokenHeader)
@@ -861,14 +795,14 @@ func (s *proxyServer) applyUpstreamToken(r *http.Request, policy *gatewayPolicyD
 	if token == "" {
 		return
 	}
-	r.Header.Set(headerName, formatTokenHeaderValue(headerName, token))
+	r.Header.Set(headerName, serviceutil.FormatTokenHeaderValue(headerName, token))
 }
 
-func (s *proxyServer) identityHeaderNames(policy *gatewayPolicyDocument) (string, string, string) {
+func (s *proxyServer) identityHeaderNames(policy *policypkg.Document) (string, string, string) {
 	humanHeader := s.defaultHumanHeader
 	agentHeader := s.defaultAgentHeader
 	sessionHeader := s.defaultSessionHeader
-	if policy != nil {
+	if policy != nil && policy.Auth != nil {
 		if policy.Auth.HumanIDHeader != "" {
 			humanHeader = policy.Auth.HumanIDHeader
 		}
@@ -882,44 +816,44 @@ func (s *proxyServer) identityHeaderNames(policy *gatewayPolicyDocument) (string
 	return humanHeader, agentHeader, sessionHeader
 }
 
-func authorizeRequest(policy *gatewayPolicyDocument, identity identityContext, rpcMethod, toolName string) authzDecision {
+func authorizeRequest(policy *policypkg.Document, identity identityContext, rpcMethod, toolName string) authzDecision {
 	decision := authzDecision{
 		Allowed:       true,
 		Status:        http.StatusOK,
 		Reason:        "allowed",
-		PolicyVersion: policy.Policy.PolicyVersion,
+		PolicyVersion: policyVersionOrDefault(policy, ""),
 	}
-	if !isToolCallMethod(rpcMethod) {
+	if !policypkg.IsToolCallMethod(rpcMethod) {
 		return decision
 	}
-	if strings.EqualFold(policy.Policy.Mode, "observe") {
+	if policyModeObserve(policy) {
 		return decision
 	}
 	if identity.HumanID == "" && identity.AgentID == "" {
-		return deny(http.StatusUnauthorized, "missing_identity", policy.Policy.PolicyVersion)
+		return deny(http.StatusUnauthorized, "missing_identity", policyVersionOrDefault(policy, ""))
 	}
-	if policy.Session.Required && identity.SessionID == "" {
-		return deny(http.StatusUnauthorized, "missing_session", policy.Policy.PolicyVersion)
+	if sessionRequired(policy) && identity.SessionID == "" {
+		return deny(http.StatusUnauthorized, "missing_session", policyVersionOrDefault(policy, ""))
 	}
 
 	session, sessionFound := findSession(policy.Sessions, identity)
-	if policy.Session.Required {
+	if sessionRequired(policy) {
 		if !sessionFound {
-			return deny(http.StatusUnauthorized, "session_not_found", policy.Policy.PolicyVersion)
+			return deny(http.StatusUnauthorized, "session_not_found", policyVersionOrDefault(policy, ""))
 		}
 		if session.Revoked {
-			return deny(http.StatusUnauthorized, "session_revoked", choosePolicyVersion(session.PolicyVersion, policy.Policy.PolicyVersion))
+			return deny(http.StatusUnauthorized, "session_revoked", policypkg.ChoosePolicyVersion(session.PolicyVersion, policyVersionOrDefault(policy, "")))
 		}
 		if isExpired(session.ExpiresAt) {
-			return deny(http.StatusUnauthorized, "session_expired", choosePolicyVersion(session.PolicyVersion, policy.Policy.PolicyVersion))
+			return deny(http.StatusUnauthorized, "session_expired", policypkg.ChoosePolicyVersion(session.PolicyVersion, policyVersionOrDefault(policy, "")))
 		}
 	} else if identity.SessionID == "" || !sessionFound || session.Revoked || isExpired(session.ExpiresAt) {
-		session = gatewayPolicyBinding{}
+		session = policypkg.Binding{}
 		sessionFound = false
 	}
 
 	requiredTrust := resolveToolTrust(policy.Tools, toolName)
-	requiredRank := trustRank(requiredTrust)
+	requiredRank := policypkg.TrustRank(requiredTrust)
 
 	matchingGrants := matchingGrants(policy.Grants, identity)
 	if len(matchingGrants) == 0 {
@@ -928,7 +862,7 @@ func authorizeRequest(policy *gatewayPolicyDocument, identity identityContext, r
 
 	bestAdminRank := 0
 	toolAllowed := false
-	policyVersion := policy.Policy.PolicyVersion
+	policyVersion := policyVersionOrDefault(policy, "")
 	for _, grant := range matchingGrants {
 		if grant.Disabled {
 			continue
@@ -936,7 +870,7 @@ func authorizeRequest(policy *gatewayPolicyDocument, identity identityContext, r
 		if grant.PolicyVersion != "" {
 			policyVersion = grant.PolicyVersion
 		}
-		adminRank := trustRank(grant.MaxTrust)
+		adminRank := policypkg.TrustRank(grant.MaxTrust)
 		if len(grant.ToolRules) == 0 {
 			toolAllowed = true
 			if adminRank > bestAdminRank {
@@ -949,13 +883,13 @@ func authorizeRequest(policy *gatewayPolicyDocument, identity identityContext, r
 				continue
 			}
 			if strings.EqualFold(rule.Decision, "deny") {
-				return deny(http.StatusForbidden, "tool_denied", choosePolicyVersion(grant.PolicyVersion, policy.Policy.PolicyVersion))
+				return deny(http.StatusForbidden, "tool_denied", policypkg.ChoosePolicyVersion(grant.PolicyVersion, policyVersionOrDefault(policy, "")))
 			}
 			toolAllowed = true
-			ruleRank := trustRank(rule.RequiredTrust)
+			ruleRank := policypkg.TrustRank(rule.RequiredTrust)
 			if ruleRank > requiredRank {
 				requiredRank = ruleRank
-				requiredTrust = normalizeTrust(rule.RequiredTrust)
+				requiredTrust = policypkg.NormalizeTrust(rule.RequiredTrust)
 			}
 			if adminRank > bestAdminRank {
 				bestAdminRank = adminRank
@@ -971,10 +905,10 @@ func authorizeRequest(policy *gatewayPolicyDocument, identity identityContext, r
 	}
 
 	consentedRank := bestAdminRank
-	consentedTrust := rankToTrust(bestAdminRank)
+	consentedTrust := policypkg.RankToTrust(bestAdminRank)
 	if sessionFound && session.ConsentedTrust != "" {
-		consentedRank = trustRank(session.ConsentedTrust)
-		consentedTrust = rankToTrust(consentedRank)
+		consentedRank = policypkg.TrustRank(session.ConsentedTrust)
+		consentedTrust = policypkg.RankToTrust(consentedRank)
 	}
 	effectiveRank := minInt(bestAdminRank, consentedRank)
 	if effectiveRank < requiredRank {
@@ -983,9 +917,9 @@ func authorizeRequest(policy *gatewayPolicyDocument, identity identityContext, r
 			Reason:         "trust_too_low",
 			PolicyVersion:  policyVersion,
 			RequiredTrust:  requiredTrust,
-			AdminTrust:     rankToTrust(bestAdminRank),
+			AdminTrust:     policypkg.RankToTrust(bestAdminRank),
 			ConsentedTrust: consentedTrust,
-			EffectiveTrust: rankToTrust(effectiveRank),
+			EffectiveTrust: policypkg.RankToTrust(effectiveRank),
 		}
 	}
 
@@ -995,26 +929,27 @@ func authorizeRequest(policy *gatewayPolicyDocument, identity identityContext, r
 		Reason:         "allowed",
 		PolicyVersion:  policyVersion,
 		RequiredTrust:  requiredTrust,
-		AdminTrust:     rankToTrust(bestAdminRank),
+		AdminTrust:     policypkg.RankToTrust(bestAdminRank),
 		ConsentedTrust: consentedTrust,
-		EffectiveTrust: rankToTrust(effectiveRank),
+		EffectiveTrust: policypkg.RankToTrust(effectiveRank),
 	}
 }
 
-func decideByDefault(policy *gatewayPolicyDocument, reason string) authzDecision {
-	if strings.EqualFold(policy.Policy.DefaultDecision, "allow") {
+func decideByDefault(policy *policypkg.Document, reason string) authzDecision {
+	policyVersion := policyVersionOrDefault(policy, "")
+	if defaultDecisionAllow(policy) {
 		return authzDecision{
 			Allowed:       true,
 			Status:        http.StatusOK,
 			Reason:        reason,
-			PolicyVersion: policy.Policy.PolicyVersion,
+			PolicyVersion: policyVersion,
 		}
 	}
-	return deny(http.StatusForbidden, reason, policy.Policy.PolicyVersion)
+	return deny(http.StatusForbidden, reason, policyVersion)
 }
 
-func matchingGrants(grants []gatewayPolicyGrant, identity identityContext) []gatewayPolicyGrant {
-	var matched []gatewayPolicyGrant
+func matchingGrants(grants []policypkg.Grant, identity identityContext) []policypkg.Grant {
+	var matched []policypkg.Grant
 	for _, grant := range grants {
 		if subjectMatches(grant.HumanID, grant.AgentID, identity) {
 			matched = append(matched, grant)
@@ -1023,21 +958,21 @@ func matchingGrants(grants []gatewayPolicyGrant, identity identityContext) []gat
 	return matched
 }
 
-func findSession(sessions []gatewayPolicyBinding, identity identityContext) (gatewayPolicyBinding, bool) {
+func findSession(sessions []policypkg.Binding, identity identityContext) (policypkg.Binding, bool) {
 	if identity.SessionID != "" {
 		for _, session := range sessions {
 			if session.Name == identity.SessionID && subjectMatches(session.HumanID, session.AgentID, identity) {
 				return session, true
 			}
 		}
-		return gatewayPolicyBinding{}, false
+		return policypkg.Binding{}, false
 	}
 	for _, session := range sessions {
 		if subjectMatches(session.HumanID, session.AgentID, identity) {
 			return session, true
 		}
 	}
-	return gatewayPolicyBinding{}, false
+	return policypkg.Binding{}, false
 }
 
 func subjectMatches(humanID, agentID string, identity identityContext) bool {
@@ -1050,22 +985,13 @@ func subjectMatches(humanID, agentID string, identity identityContext) bool {
 	return humanID != "" || agentID != ""
 }
 
-func resolveToolTrust(tools []gatewayPolicyTool, toolName string) string {
+func resolveToolTrust(tools []policypkg.Tool, toolName string) string {
 	for _, tool := range tools {
 		if tool.Name == toolName && tool.RequiredTrust != "" {
-			return normalizeTrust(tool.RequiredTrust)
+			return policypkg.NormalizeTrust(tool.RequiredTrust)
 		}
 	}
 	return "low"
-}
-
-func isToolCallMethod(method string) bool {
-	switch method {
-	case "tools/call", "call_tool":
-		return true
-	default:
-		return false
-	}
 }
 
 func isOAuthProtectedMetadataPath(value string) bool {
@@ -1091,19 +1017,38 @@ func oauthMetadataPath(value string) string {
 	return oauthProtectedPrefix + value
 }
 
-func oauthTokenHeader(policy *gatewayPolicyDocument) string {
-	if policy != nil && strings.TrimSpace(policy.Auth.TokenHeader) != "" {
+func oauthTokenHeader(policy *policypkg.Document) string {
+	if policy != nil && policy.Auth != nil && strings.TrimSpace(policy.Auth.TokenHeader) != "" {
 		return strings.TrimSpace(policy.Auth.TokenHeader)
 	}
 	return defaultTokenHeader
 }
 
-func policyUsesOAuth(policy *gatewayPolicyDocument) bool {
-	return policy != nil && strings.EqualFold(policy.Auth.Mode, "oauth")
+// policyVersionOrDefault safely retrieves the policy version with a default
+func policyVersionOrDefault(policy *policypkg.Document, def string) string {
+	if policy != nil && policy.Policy != nil && policy.Policy.PolicyVersion != "" {
+		return policy.Policy.PolicyVersion
+	}
+	return def
 }
 
-func shouldChallengeOAuth(policy *gatewayPolicyDocument, decision authzDecision) bool {
-	if !policyUsesOAuth(policy) || decision.Status != http.StatusUnauthorized {
+// sessionRequired safely checks if session is required
+func sessionRequired(policy *policypkg.Document) bool {
+	return policy != nil && policy.Session != nil && policy.Session.Required
+}
+
+// policyModeObserve safely checks if policy mode is observe
+func policyModeObserve(policy *policypkg.Document) bool {
+	return policy != nil && policy.Policy != nil && strings.EqualFold(policy.Policy.Mode, "observe")
+}
+
+// defaultDecisionAllow safely checks if default decision is allow
+func defaultDecisionAllow(policy *policypkg.Document) bool {
+	return policy != nil && policy.Policy != nil && strings.EqualFold(policy.Policy.DefaultDecision, "allow")
+}
+
+func shouldChallengeOAuth(policy *policypkg.Document, decision authzDecision) bool {
+	if !policypkg.PolicyUsesOAuth(policy) || decision.Status != http.StatusUnauthorized {
 		return false
 	}
 	switch decision.Reason {
@@ -1133,39 +1078,6 @@ func deny(status int, reason, policyVersion string) authzDecision {
 	}
 }
 
-func normalizeTrust(value string) string {
-	switch strings.ToLower(strings.TrimSpace(value)) {
-	case "high":
-		return "high"
-	case "medium":
-		return "medium"
-	default:
-		return "low"
-	}
-}
-
-func trustRank(value string) int {
-	switch normalizeTrust(value) {
-	case "high":
-		return 3
-	case "medium":
-		return 2
-	default:
-		return 1
-	}
-}
-
-func rankToTrust(value int) string {
-	switch {
-	case value >= 3:
-		return "high"
-	case value == 2:
-		return "medium"
-	default:
-		return "low"
-	}
-}
-
 func isExpired(value string) bool {
 	if strings.TrimSpace(value) == "" {
 		return false
@@ -1177,29 +1089,11 @@ func isExpired(value string) bool {
 	return time.Now().After(expiresAt)
 }
 
-func choosePolicyVersion(values ...string) string {
-	for _, value := range values {
-		if strings.TrimSpace(value) != "" {
-			return value
-		}
-	}
-	return defaultPolicyVersion
-}
-
 func minInt(a, b int) int {
 	if a < b {
 		return a
 	}
 	return b
-}
-
-func firstNonEmpty(values ...string) string {
-	for _, value := range values {
-		if strings.TrimSpace(value) != "" {
-			return value
-		}
-	}
-	return ""
 }
 
 func stringClaim(claims jwt.MapClaims, key string) string {
@@ -1211,52 +1105,18 @@ func stringClaim(claims jwt.MapClaims, key string) string {
 	return ""
 }
 
-func audienceMatches(audClaim any, expected string) bool {
-	switch aud := audClaim.(type) {
-	case string:
-		return aud == expected
-	case []any:
-		for _, item := range aud {
-			if value, ok := item.(string); ok && value == expected {
-				return true
-			}
-		}
-	case []string:
-		for _, value := range aud {
-			if value == expected {
-				return true
-			}
-		}
-	}
-	return false
-}
-
 func extractToken(headerName, value string) string {
 	value = strings.TrimSpace(value)
 	if value == "" {
 		return ""
 	}
 	if strings.EqualFold(strings.TrimSpace(headerName), "authorization") {
-		return extractBearer(value)
+		return serviceutil.ExtractBearer(value)
 	}
-	if token := extractBearer(value); token != "" {
+	if token := serviceutil.ExtractBearer(value); token != "" {
 		return token
 	}
 	return value
-}
-
-func extractBearer(value string) string {
-	if strings.HasPrefix(strings.ToLower(value), "bearer ") {
-		return strings.TrimSpace(value[7:])
-	}
-	return ""
-}
-
-func formatTokenHeaderValue(headerName, token string) string {
-	if strings.EqualFold(strings.TrimSpace(headerName), "authorization") {
-		return "Bearer " + token
-	}
-	return token
 }
 
 func authServerMetadataCandidates(issuerURL string) []string {
@@ -1386,34 +1246,6 @@ func ternary(condition bool, truthy, falsy string) string {
 		return truthy
 	}
 	return falsy
-}
-
-func policyServerName(policy *gatewayPolicyDocument) string {
-	if policy == nil {
-		return ""
-	}
-	return policy.Server.Name
-}
-
-func policyServerNamespace(policy *gatewayPolicyDocument) string {
-	if policy == nil {
-		return ""
-	}
-	return policy.Server.Namespace
-}
-
-func policyServerCluster(policy *gatewayPolicyDocument) string {
-	if policy == nil {
-		return ""
-	}
-	return policy.Server.Cluster
-}
-
-func policyVersion(policy *gatewayPolicyDocument) string {
-	if policy == nil {
-		return ""
-	}
-	return policy.Policy.PolicyVersion
 }
 
 func trimRequestPathPrefix(value, prefix string) (string, bool) {
@@ -1586,16 +1418,8 @@ func inspectRPCRequest(r *http.Request) rpcInspection {
 	return rpcInspection{
 		Method:   req.Method,
 		ToolName: toolName,
-		ToolCall: isToolCallMethod(req.Method),
+		ToolCall: policypkg.IsToolCallMethod(req.Method),
 	}
-}
-
-// envOr returns the value of an environment variable or a fallback if not set.
-func envOr(key, fallback string) string {
-	if val := strings.TrimSpace(os.Getenv(key)); val != "" {
-		return val
-	}
-	return fallback
 }
 
 // maxInt64 returns the maximum of two int64 values.
@@ -1616,7 +1440,7 @@ func initTracer(serviceName string) (func(context.Context) error, error) {
 		return func(context.Context) error { return nil }, nil
 	}
 
-	opts := otlpTraceOptions(endpoint)
+	opts := serviceutil.OTLPTraceOptions(endpoint)
 	exporter, err := otlptracehttp.New(context.Background(), opts...)
 	if err != nil {
 		return nil, err
@@ -1635,49 +1459,4 @@ func initTracer(serviceName string) (func(context.Context) error, error) {
 	)
 	otel.SetTracerProvider(provider)
 	return provider.Shutdown, nil
-}
-
-// otlpTraceOptions configures OTLP HTTP exporter options.
-func otlpTraceOptions(endpoint string) []otlptracehttp.Option {
-	insecure, insecureSet := boolEnv("OTEL_EXPORTER_OTLP_INSECURE")
-	if u, err := url.Parse(endpoint); err == nil {
-		if u.Scheme != "" && u.Host == "" {
-			// Fall through and treat this like host:port.
-		} else if u.Scheme != "" && u.Host != "" {
-			opts := []otlptracehttp.Option{otlptracehttp.WithEndpoint(u.Host)}
-			if u.Path != "" {
-				opts = append(opts, otlptracehttp.WithURLPath(u.Path))
-			}
-			if insecureSet {
-				if insecure {
-					opts = append(opts, otlptracehttp.WithInsecure())
-				}
-				return opts
-			}
-			if u.Scheme == "http" {
-				opts = append(opts, otlptracehttp.WithInsecure())
-			}
-			return opts
-		}
-	}
-
-	opts := []otlptracehttp.Option{otlptracehttp.WithEndpoint(endpoint)}
-	if insecureSet {
-		if insecure {
-			opts = append(opts, otlptracehttp.WithInsecure())
-		}
-		return opts
-	}
-	return opts
-}
-
-// boolEnv parses a boolean environment variable.
-func boolEnv(key string) (bool, bool) {
-	if val := strings.TrimSpace(os.Getenv(key)); val != "" {
-		parsed, err := strconv.ParseBool(val)
-		if err == nil {
-			return parsed, true
-		}
-	}
-	return false, false
 }

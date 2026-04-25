@@ -9,7 +9,10 @@ require (
 	go.opentelemetry.io/otel v1.43.0
 	go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracehttp v1.43.0
 	go.opentelemetry.io/otel/sdk v1.43.0
+	mcp-runtime v0.0.0
 )
+
+replace mcp-runtime => ../..
 
 require (
 	github.com/cenkalti/backoff/v5 v5.0.3 // indirect

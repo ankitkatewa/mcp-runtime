@@ -25,7 +25,6 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	networkingv1 "k8s.io/api/networking/v1"
 	"k8s.io/apimachinery/pkg/api/errors"
-	"k8s.io/apimachinery/pkg/api/meta"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
@@ -38,6 +37,8 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/log"
 
 	mcpv1alpha1 "mcp-runtime/api/v1alpha1"
+	"mcp-runtime/pkg/operatorutil"
+	"mcp-runtime/pkg/policy"
 )
 
 // RegistryConfig holds configuration for a provisioned container registry.
@@ -86,90 +87,8 @@ const (
 	gatewayPolicyFilePath   = gatewayPolicyMountDir + "/" + gatewayPolicyFileName
 )
 
-type resourceReadiness struct {
-	Deployment bool
-	Service    bool
-	Ingress    bool
-	Gateway    bool
-	Policy     bool
-	Canary     bool
-}
-
-type gatewayPolicyDocument struct {
-	Server   gatewayPolicyServer    `json:"server"`
-	Auth     gatewayPolicyAuth      `json:"auth"`
-	Policy   gatewayPolicyConfig    `json:"policy"`
-	Session  gatewayPolicySession   `json:"session"`
-	Tools    []gatewayPolicyTool    `json:"tools,omitempty"`
-	Grants   []gatewayPolicyGrant   `json:"grants,omitempty"`
-	Sessions []gatewayPolicyBinding `json:"sessions,omitempty"`
-}
-
-type gatewayPolicyServer struct {
-	Name      string `json:"name"`
-	Namespace string `json:"namespace"`
-	Cluster   string `json:"cluster,omitempty"`
-}
-
-type gatewayPolicyAuth struct {
-	Mode            string `json:"mode,omitempty"`
-	HumanIDHeader   string `json:"human_id_header,omitempty"`
-	AgentIDHeader   string `json:"agent_id_header,omitempty"`
-	SessionIDHeader string `json:"session_id_header,omitempty"`
-	TokenHeader     string `json:"token_header,omitempty"`
-	IssuerURL       string `json:"issuer_url,omitempty"`
-	Audience        string `json:"audience,omitempty"`
-}
-
-type gatewayPolicyConfig struct {
-	Mode            string `json:"mode,omitempty"`
-	DefaultDecision string `json:"default_decision,omitempty"`
-	EnforceOn       string `json:"enforce_on,omitempty"`
-	PolicyVersion   string `json:"policy_version,omitempty"`
-}
-
-type gatewayPolicySession struct {
-	Required            bool   `json:"required,omitempty"`
-	Store               string `json:"store,omitempty"`
-	HeaderName          string `json:"header_name,omitempty"`
-	MaxLifetime         string `json:"max_lifetime,omitempty"`
-	IdleTimeout         string `json:"idle_timeout,omitempty"`
-	UpstreamTokenHeader string `json:"upstream_token_header,omitempty"`
-}
-
-type gatewayPolicyTool struct {
-	Name          string            `json:"name"`
-	Description   string            `json:"description,omitempty"`
-	RequiredTrust string            `json:"required_trust,omitempty"`
-	Labels        map[string]string `json:"labels,omitempty"`
-}
-
-type gatewayPolicyGrant struct {
-	Name          string              `json:"name"`
-	HumanID       string              `json:"human_id,omitempty"`
-	AgentID       string              `json:"agent_id,omitempty"`
-	MaxTrust      string              `json:"max_trust,omitempty"`
-	PolicyVersion string              `json:"policy_version,omitempty"`
-	Disabled      bool                `json:"disabled,omitempty"`
-	ToolRules     []gatewayToolAccess `json:"tool_rules,omitempty"`
-}
-
-type gatewayPolicyBinding struct {
-	Name             string `json:"name"`
-	HumanID          string `json:"human_id,omitempty"`
-	AgentID          string `json:"agent_id,omitempty"`
-	ConsentedTrust   string `json:"consented_trust,omitempty"`
-	Revoked          bool   `json:"revoked,omitempty"`
-	ExpiresAt        string `json:"expires_at,omitempty"`
-	PolicyVersion    string `json:"policy_version,omitempty"`
-	UpstreamTokenRef string `json:"upstream_token_ref,omitempty"`
-}
-
-type gatewayToolAccess struct {
-	Name          string `json:"name"`
-	Decision      string `json:"decision,omitempty"`
-	RequiredTrust string `json:"required_trust,omitempty"`
-}
+// resourceReadiness tracks the readiness state of different resources.
+type resourceReadiness = operatorutil.ResourceReadiness
 
 //+kubebuilder:rbac:groups=mcpruntime.org,resources=mcpservers,verbs=get;list;watch;create;update;patch;delete
 //+kubebuilder:rbac:groups=mcpruntime.org,resources=mcpservers/status,verbs=get;update;patch
@@ -1125,9 +1044,9 @@ func (r *MCPServerReconciler) reconcilePolicyConfigMap(ctx context.Context, mcpS
 	return err
 }
 
-func (r *MCPServerReconciler) renderGatewayPolicy(ctx context.Context, mcpServer *mcpv1alpha1.MCPServer) (*gatewayPolicyDocument, error) {
-	doc := &gatewayPolicyDocument{
-		Server: gatewayPolicyServer{
+func (r *MCPServerReconciler) renderGatewayPolicy(ctx context.Context, mcpServer *mcpv1alpha1.MCPServer) (*policy.Document, error) {
+	doc := &policy.Document{
+		Server: policy.Server{
 			Name:      mcpServer.Name,
 			Namespace: mcpServer.Namespace,
 			Cluster:   strings.TrimSpace(r.ClusterName),
@@ -1135,7 +1054,7 @@ func (r *MCPServerReconciler) renderGatewayPolicy(ctx context.Context, mcpServer
 	}
 
 	if mcpServer.Spec.Auth != nil {
-		doc.Auth = gatewayPolicyAuth{
+		doc.Auth = &policy.Auth{
 			Mode:            string(mcpServer.Spec.Auth.Mode),
 			HumanIDHeader:   mcpServer.Spec.Auth.HumanIDHeader,
 			AgentIDHeader:   mcpServer.Spec.Auth.AgentIDHeader,
@@ -1146,7 +1065,7 @@ func (r *MCPServerReconciler) renderGatewayPolicy(ctx context.Context, mcpServer
 		}
 	}
 	if mcpServer.Spec.Policy != nil {
-		doc.Policy = gatewayPolicyConfig{
+		doc.Policy = &policy.Config{
 			Mode:            string(mcpServer.Spec.Policy.Mode),
 			DefaultDecision: string(mcpServer.Spec.Policy.DefaultDecision),
 			EnforceOn:       mcpServer.Spec.Policy.EnforceOn,
@@ -1154,7 +1073,7 @@ func (r *MCPServerReconciler) renderGatewayPolicy(ctx context.Context, mcpServer
 		}
 	}
 	if mcpServer.Spec.Session != nil {
-		doc.Session = gatewayPolicySession{
+		doc.Session = &policy.Session{
 			Required:            mcpServer.Spec.Session.Required,
 			Store:               mcpServer.Spec.Session.Store,
 			HeaderName:          mcpServer.Spec.Session.HeaderName,
@@ -1164,9 +1083,9 @@ func (r *MCPServerReconciler) renderGatewayPolicy(ctx context.Context, mcpServer
 		}
 	}
 	if len(mcpServer.Spec.Tools) > 0 {
-		doc.Tools = make([]gatewayPolicyTool, 0, len(mcpServer.Spec.Tools))
+		doc.Tools = make([]policy.Tool, 0, len(mcpServer.Spec.Tools))
 		for _, tool := range mcpServer.Spec.Tools {
-			rendered := gatewayPolicyTool{
+			rendered := policy.Tool{
 				Name:          tool.Name,
 				Description:   tool.Description,
 				RequiredTrust: string(tool.RequiredTrust),
@@ -1189,7 +1108,7 @@ func (r *MCPServerReconciler) renderGatewayPolicy(ctx context.Context, mcpServer
 		if !serverReferenceMatches(grant.Namespace, grant.Spec.ServerRef, mcpServer) {
 			continue
 		}
-		rendered := gatewayPolicyGrant{
+		rendered := policy.Grant{
 			Name:          grant.Name,
 			HumanID:       grant.Spec.Subject.HumanID,
 			AgentID:       grant.Spec.Subject.AgentID,
@@ -1198,7 +1117,7 @@ func (r *MCPServerReconciler) renderGatewayPolicy(ctx context.Context, mcpServer
 			Disabled:      grant.Spec.Disabled,
 		}
 		for _, rule := range grant.Spec.ToolRules {
-			rendered.ToolRules = append(rendered.ToolRules, gatewayToolAccess{
+			rendered.ToolRules = append(rendered.ToolRules, policy.ToolAccess{
 				Name:          rule.Name,
 				Decision:      string(defaultDecision(rule.Decision)),
 				RequiredTrust: string(defaultTrust(rule.RequiredTrust)),
@@ -1215,7 +1134,7 @@ func (r *MCPServerReconciler) renderGatewayPolicy(ctx context.Context, mcpServer
 		if !serverReferenceMatches(session.Namespace, session.Spec.ServerRef, mcpServer) {
 			continue
 		}
-		rendered := gatewayPolicyBinding{
+		rendered := policy.Binding{
 			Name:           session.Name,
 			HumanID:        session.Spec.Subject.HumanID,
 			AgentID:        session.Spec.Subject.AgentID,
@@ -1599,21 +1518,16 @@ func (r *MCPServerReconciler) checkIngressReady(ctx context.Context, mcpServer *
 }
 
 func (r *MCPServerReconciler) updateStatus(ctx context.Context, mcpServer *mcpv1alpha1.MCPServer, phase, message string, readiness resourceReadiness) {
-	// Re-fetch the object to get the latest resourceVersion before updating status.
-	// This prevents "object has been modified" errors due to optimistic concurrency control.
-	// The object might have been updated by:
-	// 1. applyDefaultsIfNeeded() updating the spec
-	// 2. Another reconcile loop running concurrently
-	// 3. External modifications
+	logger := log.FromContext(ctx)
+
+	// Re-fetch the object to get the latest resourceVersion
 	latest := &mcpv1alpha1.MCPServer{}
 	if err := r.Get(ctx, types.NamespacedName{Name: mcpServer.Name, Namespace: mcpServer.Namespace}, latest); err != nil {
-		// If object not found, it may have been deleted - skip status update
 		if errors.IsNotFound(err) {
-			log.FromContext(ctx).V(1).Info("MCPServer not found, skipping status update (may have been deleted)")
+			logger.V(1).Info("MCPServer not found, skipping status update (may have been deleted)")
 			return
 		}
-		// For other errors, log but try to update with the original object as fallback
-		log.FromContext(ctx).Error(err, "Failed to fetch MCPServer for status update, using original object")
+		logger.Error(err, "Failed to fetch MCPServer for status update, using original object")
 		latest = mcpServer
 	}
 
@@ -1627,65 +1541,20 @@ func (r *MCPServerReconciler) updateStatus(ctx context.Context, mcpServer *mcpv1
 	latest.Status.PolicyReady = readiness.Policy
 	latest.Status.CanaryReady = readiness.Canary
 
-	meta.SetStatusCondition(&latest.Status.Conditions, metav1.Condition{
-		Type:               "DeploymentReady",
-		Status:             conditionStatus(readiness.Deployment),
-		Reason:             phase,
-		Message:            message,
-		LastTransitionTime: metav1.Now(),
-		ObservedGeneration: latest.Generation,
-	})
-	meta.SetStatusCondition(&latest.Status.Conditions, metav1.Condition{
-		Type:               "ServiceReady",
-		Status:             conditionStatus(readiness.Service),
-		Reason:             phase,
-		Message:            message,
-		LastTransitionTime: metav1.Now(),
-		ObservedGeneration: latest.Generation,
-	})
-	meta.SetStatusCondition(&latest.Status.Conditions, metav1.Condition{
-		Type:               "IngressReady",
-		Status:             conditionStatus(readiness.Ingress),
-		Reason:             phase,
-		Message:            message,
-		LastTransitionTime: metav1.Now(),
-		ObservedGeneration: latest.Generation,
-	})
-	meta.SetStatusCondition(&latest.Status.Conditions, metav1.Condition{
-		Type:               "GatewayReady",
-		Status:             conditionStatus(readiness.Gateway),
-		Reason:             phase,
-		Message:            message,
-		LastTransitionTime: metav1.Now(),
-		ObservedGeneration: latest.Generation,
-	})
-	meta.SetStatusCondition(&latest.Status.Conditions, metav1.Condition{
-		Type:               "PolicyReady",
-		Status:             conditionStatus(readiness.Policy),
-		Reason:             phase,
-		Message:            message,
-		LastTransitionTime: metav1.Now(),
-		ObservedGeneration: latest.Generation,
-	})
-	meta.SetStatusCondition(&latest.Status.Conditions, metav1.Condition{
-		Type:               "CanaryReady",
-		Status:             conditionStatus(readiness.Canary),
-		Reason:             phase,
-		Message:            message,
-		LastTransitionTime: metav1.Now(),
-		ObservedGeneration: latest.Generation,
-	})
+	// Update all conditions using the centralized helper
+	operatorutil.SetCondition(&latest.Status.Conditions, operatorutil.DeploymentReady, readiness.Deployment, phase, message, latest.Generation)
+	operatorutil.SetCondition(&latest.Status.Conditions, operatorutil.ServiceReady, readiness.Service, phase, message, latest.Generation)
+	operatorutil.SetCondition(&latest.Status.Conditions, operatorutil.IngressReady, readiness.Ingress, phase, message, latest.Generation)
+	operatorutil.SetCondition(&latest.Status.Conditions, operatorutil.GatewayReady, readiness.Gateway, phase, message, latest.Generation)
+	operatorutil.SetCondition(&latest.Status.Conditions, operatorutil.PolicyReady, readiness.Policy, phase, message, latest.Generation)
+	operatorutil.SetCondition(&latest.Status.Conditions, operatorutil.CanaryReady, readiness.Canary, phase, message, latest.Generation)
 
 	// Use Status().Update() which only updates the status subresource
-	// This is safer than Update() which would update the entire object
 	if err := r.Status().Update(ctx, latest); err != nil {
-		// If it's a conflict error, that's expected in concurrent scenarios - log at debug level
 		if errors.IsConflict(err) {
-			log.FromContext(ctx).V(1).Info("Status update conflict (expected in concurrent reconciles), will retry on next reconcile", "resourceVersion", latest.ResourceVersion)
+			logger.V(1).Info("Status update conflict (expected in concurrent reconciles), will retry on next reconcile", "resourceVersion", latest.ResourceVersion)
 		} else {
-			// Log other errors but don't fail the reconcile - status update failures are non-fatal
-			// The next reconcile will retry the status update
-			log.FromContext(ctx).Error(err, "Failed to update MCPServer status", "resourceVersion", latest.ResourceVersion)
+			logger.Error(err, "Failed to update MCPServer status", "resourceVersion", latest.ResourceVersion)
 		}
 	}
 }
@@ -1713,13 +1582,6 @@ func (r *MCPServerReconciler) buildEnvVars(envVars []mcpv1alpha1.EnvVar, secretE
 		})
 	}
 	return result
-}
-
-func conditionStatus(ready bool) metav1.ConditionStatus {
-	if ready {
-		return metav1.ConditionTrue
-	}
-	return metav1.ConditionFalse
 }
 
 func (r *MCPServerReconciler) buildIngressAnnotations(mcpServer *mcpv1alpha1.MCPServer) map[string]string {
