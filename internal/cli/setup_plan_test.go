@@ -11,8 +11,11 @@ import (
 
 func TestBuildSetupPlan_DefaultHTTP(t *testing.T) {
 	plan := BuildSetupPlan(SetupPlanInput{
+		Kubeconfig:             "/tmp/kubeconfig",
+		Context:                "my-context",
 		RegistryType:           "docker",
 		RegistryStorageSize:    "20Gi",
+		StorageMode:            "dynamic",
 		IngressMode:            "traefik",
 		IngressManifest:        "config/ingress/overlays/http",
 		IngressManifestChanged: false,
@@ -23,6 +26,12 @@ func TestBuildSetupPlan_DefaultHTTP(t *testing.T) {
 	if plan.Ingress.manifest != "config/ingress/overlays/http" {
 		t.Fatalf("expected http ingress manifest, got %q", plan.Ingress.manifest)
 	}
+	if plan.Kubeconfig != "/tmp/kubeconfig" {
+		t.Fatalf("expected kubeconfig to be preserved, got %q", plan.Kubeconfig)
+	}
+	if plan.Context != "my-context" {
+		t.Fatalf("expected context to be preserved, got %q", plan.Context)
+	}
 	if plan.RegistryManifest != "config/registry" {
 		t.Fatalf("expected default registry manifest, got %q", plan.RegistryManifest)
 	}
@@ -32,6 +41,7 @@ func TestBuildSetupPlan_DefaultTLS(t *testing.T) {
 	plan := BuildSetupPlan(SetupPlanInput{
 		RegistryType:           "docker",
 		RegistryStorageSize:    "20Gi",
+		StorageMode:            "dynamic",
 		IngressMode:            "traefik",
 		IngressManifest:        "config/ingress/overlays/http",
 		IngressManifestChanged: false,
@@ -51,6 +61,7 @@ func TestBuildSetupPlan_CustomIngressManifest(t *testing.T) {
 	plan := BuildSetupPlan(SetupPlanInput{
 		RegistryType:           "docker",
 		RegistryStorageSize:    "20Gi",
+		StorageMode:            "dynamic",
 		IngressMode:            "traefik",
 		IngressManifest:        "custom/manifest",
 		IngressManifestChanged: true,
@@ -71,6 +82,7 @@ func TestBuildSetupPlan_PreservesTestModeAndOperatorArgs(t *testing.T) {
 	plan := BuildSetupPlan(SetupPlanInput{
 		RegistryType:           "docker",
 		RegistryStorageSize:    "20Gi",
+		StorageMode:            "dynamic",
 		IngressMode:            "traefik",
 		IngressManifest:        "config/ingress/overlays/http",
 		IngressManifestChanged: false,
@@ -94,6 +106,40 @@ func TestBuildSetupPlan_PreservesTestModeAndOperatorArgs(t *testing.T) {
 		if plan.OperatorArgs[i] != operatorArgs[i] {
 			t.Fatalf("expected operator arg %d to be %q, got %q", i, operatorArgs[i], plan.OperatorArgs[i])
 		}
+	}
+}
+
+func TestBuildSetupPlan_HostpathRegistryManifest(t *testing.T) {
+	plan := BuildSetupPlan(SetupPlanInput{
+		RegistryType:           "docker",
+		RegistryStorageSize:    "20Gi",
+		StorageMode:            StorageModeHostpath,
+		IngressMode:            "traefik",
+		IngressManifest:        "config/ingress/overlays/http",
+		IngressManifestChanged: false,
+		ForceIngressInstall:    false,
+		TLSEnabled:             false,
+	})
+
+	if plan.RegistryManifest != "config/registry/overlays/hostpath" {
+		t.Fatalf("expected hostpath registry manifest, got %q", plan.RegistryManifest)
+	}
+}
+
+func TestBuildSetupPlan_HostpathRegistryManifest_TLS(t *testing.T) {
+	plan := BuildSetupPlan(SetupPlanInput{
+		RegistryType:           "docker",
+		RegistryStorageSize:    "20Gi",
+		StorageMode:            StorageModeHostpath,
+		IngressMode:            "traefik",
+		IngressManifest:        "config/ingress/overlays/http",
+		IngressManifestChanged: false,
+		ForceIngressInstall:    false,
+		TLSEnabled:             true,
+	})
+
+	if plan.RegistryManifest != "config/registry/overlays/hostpath-tls" {
+		t.Fatalf("expected hostpath tls registry manifest, got %q", plan.RegistryManifest)
 	}
 }
 

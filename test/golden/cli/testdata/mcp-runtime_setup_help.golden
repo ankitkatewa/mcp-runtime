@@ -11,15 +11,18 @@ Usage:
   mcp-runtime setup [flags]
 
 Flags:
+      --context string                 Kubernetes context to use
       --force-ingress-install          Force ingress install even if an ingress class already exists
   -h, --help                           help for setup
       --ingress string                 Ingress controller to install automatically during setup (traefik|none) (default "traefik")
       --ingress-manifest string        Manifest to apply when installing the ingress controller (default "config/ingress/overlays/http")
+      --kubeconfig string              Path to kubeconfig file (default: ~/.kube/config)
       --operator-leader-elect          Override operator leader election when set
       --operator-metrics-addr string   Operator metrics bind address (default: :8080 from manager.yaml)
       --operator-probe-addr string     Operator health probe bind address (default: :8081 from manager.yaml)
       --registry-storage string        Registry storage size (default: 20Gi) (default "20Gi")
       --registry-type string           Registry type (docker; harbor coming soon) (default "docker")
+      --storage-mode string            Storage mode for local/dev clusters (dynamic|hostpath). Use hostpath for single-node k3s/minikube/kind without a provisioner. (default "dynamic")
       --strict-prod                    Require production-style registry and TLS validation for non-test setup
       --test-mode                      Test mode: skip operator/gateway image builds and use kind-loaded images
       --with-tls                       Enable TLS overlays (ingress/registry); default is HTTP for dev

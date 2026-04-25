@@ -116,7 +116,39 @@ PY
 - Status table: `./bin/mcp-runtime status`
 - Grafana/Prometheus reachable via the ingress base URL.
 
-## 8) Reference Links
+## 8) Clean Start (keep cluster, wipe workloads)
+Use this when you want a “fresh start” without uninstalling k3s/kind itself.
+
+⚠️ Destructive: deletes resources cluster-wide.
+
+```bash
+# sanity: confirm you are targeting the intended cluster
+kubectl config current-context
+kubectl get nodes
+
+# delete everything in every namespace (pods/deployments/jobs/services/ingresses/etc.)
+# NOTE: build deletable resource list dynamically to avoid errors on clusters where some optional APIs (e.g. PodSecurityPolicy) are absent.
+to_delete="$(kubectl api-resources --verbs=delete --namespaced -o name | paste -sd, -)"
+if [ -n "$to_delete" ]; then
+  kubectl delete "$to_delete" --all -A --ignore-not-found --grace-period=0 --force
+fi
+
+# cluster-scoped resources (best-effort; some may not exist depending on cluster/version)
+for r in $(kubectl api-resources --verbs=delete --namespaced=false -o name); do
+  kubectl delete "$r" --all --ignore-not-found --grace-period=0 --force || true
+done
+
+# delete all non-system namespaces (wipes everything inside them)
+ns_to_delete="$(kubectl get ns --no-headers | awk '{print $1}' | grep -E -v '^(kube-system|kube-public|kube-node-lease|default)$')"
+if [ -n "$ns_to_delete" ]; then
+  printf '%s\n' "$ns_to_delete" | xargs kubectl delete ns
+fi
+
+# optional: also wipe the default namespace
+kubectl delete all,cm,secret,ing,svc,sa,role,rolebinding,deploy,ds,sts,job,cronjob,pvc --all -n default --ignore-not-found --grace-period=0 --force
+```
+
+## 9) Reference Links
 - Project README: `README.md`
 - K8s manifests: `k8s/`
 - Sample MCP server: `examples/go-mcp-server/`
