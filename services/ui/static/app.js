@@ -1,23 +1,37 @@
 const apiBase = window.MCP_API_BASE || "/api";
+let authenticated = null;
 
 // API Helper
 async function fetchJSON(path, options = {}) {
   const headers = { ...options.headers };
-  if (window.MCP_API_KEY) {
-    headers["x-api-key"] = window.MCP_API_KEY;
-  }
 
   const response = await fetch(`${apiBase}${path}`, {
     ...options,
+    credentials: "same-origin",
     headers,
   });
 
   if (!response.ok) {
     const error = await response.text();
+    if (response.status === 401) {
+      setAuthenticated(false);
+      showAuthModal("Enter a valid API key to continue.");
+      throw unauthorizedError();
+    }
     throw new Error(error || `Request failed: ${response.status}`);
   }
 
   return response.json();
+}
+
+function unauthorizedError() {
+  const err = new Error("Unauthorized");
+  err.name = "UnauthorizedError";
+  return err;
+}
+
+function isUnauthorizedError(err) {
+  return err?.name === "UnauthorizedError";
 }
 
 // Toast Notifications
@@ -62,6 +76,13 @@ function initTabs() {
   tabs.forEach((tab) => {
     tab.addEventListener("click", () => {
       const target = tab.dataset.tab;
+
+      if (authenticated !== true) {
+        if (authenticated === false) {
+          showAuthModal();
+        }
+        return;
+      }
 
       tabs.forEach((t) => {
         const isActive = t === tab;
@@ -110,6 +131,7 @@ async function loadDashboardSummary() {
       );
     }
   } catch (err) {
+    if (isUnauthorizedError(err)) return;
     console.error("Failed to load dashboard summary:", err);
   }
 }
@@ -157,6 +179,7 @@ async function loadEvents() {
 
     tbody.appendChild(fragment);
   } catch (err) {
+    if (isUnauthorizedError(err)) return;
     console.error("Failed to load events:", err);
   }
 }
@@ -224,10 +247,144 @@ function createActionCell(label, onClick) {
   return cell;
 }
 
-function initDashboard() {
-  loadDashboardSummary();
-  loadEvents();
+// Authentication
+async function initAuth() {
+  document.getElementById("auth-form")?.addEventListener("submit", handleAuthSubmit);
+  document.getElementById("auth-open")?.addEventListener("click", () => {
+    showAuthModal();
+  });
+  document.getElementById("auth-logout")?.addEventListener("click", logout);
 
+  try {
+    const response = await fetch("/auth/status", { credentials: "same-origin" });
+    const data = await response.json();
+    setAuthenticated(Boolean(data.authenticated));
+  } catch (err) {
+    console.error("Failed to check auth status:", err);
+    setAuthenticated(false);
+  }
+
+  if (authenticated) {
+    loadActiveTab();
+    startAutoRefresh();
+  } else {
+    showAuthModal();
+  }
+}
+
+async function handleAuthSubmit(event) {
+  event.preventDefault();
+  const input = document.getElementById("api-key-input");
+  const submit = document.getElementById("auth-submit");
+  const apiKey = input?.value || "";
+
+  setAuthError("");
+  if (submit) submit.disabled = true;
+  try {
+    const response = await fetch("/auth/login", {
+      method: "POST",
+      credentials: "same-origin",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ api_key: apiKey }),
+    });
+    if (!response.ok) {
+      throw new Error(await authFailureMessage(response));
+    }
+    if (input) input.value = "";
+    hideAuthModal();
+    setAuthenticated(true);
+    loadActiveTab();
+    startAutoRefresh();
+  } catch (err) {
+    setAuthError(err.message);
+  } finally {
+    if (submit) submit.disabled = false;
+  }
+}
+
+async function authFailureMessage(response) {
+  let serverError = "";
+  try {
+    const body = await response.json();
+    serverError = body?.error || "";
+  } catch (_) {
+    // Non-JSON failures still get a useful status-based message below.
+  }
+
+  if (response.status === 401) {
+    return "Invalid API key";
+  }
+  if (response.status === 503 && serverError === "api_key_not_configured") {
+    return "Server is not configured for API key auth";
+  }
+  return serverError || `Sign-in failed (${response.status})`;
+}
+
+async function logout() {
+  try {
+    await fetch("/auth/logout", {
+      method: "POST",
+      credentials: "same-origin",
+    });
+  } catch (err) {
+    console.error("Failed to sign out:", err);
+  }
+  stopAutoRefresh();
+  setAuthenticated(false);
+  resetDashboard();
+  showAuthModal();
+}
+
+function setAuthenticated(value) {
+  authenticated = value;
+  document.getElementById("auth-open")?.classList.toggle("hidden", value);
+  document.getElementById("auth-logout")?.classList.toggle("hidden", !value);
+}
+
+function showAuthModal(message = "") {
+  stopAutoRefresh();
+  setAuthError(message);
+  const modal = document.getElementById("auth-modal");
+  modal?.classList.remove("hidden");
+  setTimeout(() => document.getElementById("api-key-input")?.focus(), 0);
+}
+
+function hideAuthModal() {
+  document.getElementById("auth-modal")?.classList.add("hidden");
+  setAuthError("");
+}
+
+function setAuthError(message) {
+  const error = document.getElementById("auth-error");
+  if (!error) return;
+  error.textContent = message;
+  error.classList.toggle("hidden", !message);
+}
+
+function loadActiveTab() {
+  if (!authenticated) return;
+  const active = document.querySelector(".tab.active")?.dataset.tab || "dashboard";
+  if (active === "dashboard") {
+    loadDashboardSummary();
+    loadEvents();
+  } else if (active === "governance") {
+    loadGrants();
+    loadSessions();
+  } else if (active === "operations") {
+    loadComponents();
+  }
+}
+
+function resetDashboard() {
+  document.getElementById("dash-total-events").textContent = "-";
+  document.getElementById("dash-active-servers").textContent = "-";
+  document.getElementById("dash-active-grants").textContent = "-";
+  document.getElementById("dash-active-sessions").textContent = "-";
+  document.getElementById("events-body").innerHTML =
+    '<tr><td colspan="5" class="empty">No events yet.</td></tr>';
+}
+
+function initDashboard() {
   // Auto refresh
   const autoRefreshCheckbox = document.getElementById("auto-refresh");
   if (autoRefreshCheckbox) {
@@ -243,11 +400,10 @@ function initDashboard() {
   document.getElementById("refresh-events")?.addEventListener("click", () => {
     loadEvents();
   });
-
-  startAutoRefresh();
 }
 
 function startAutoRefresh() {
+  if (!authenticated) return;
   if (autoRefreshInterval) return;
   const autoRefreshCheckbox = document.getElementById("auto-refresh");
   if (autoRefreshCheckbox && !autoRefreshCheckbox.checked) return;
@@ -313,6 +469,7 @@ async function loadGrants() {
 
     tbody.appendChild(fragment);
   } catch (err) {
+    if (isUnauthorizedError(err)) return;
     console.error("Failed to load grants:", err);
     document.getElementById("grants-body").innerHTML =
       '<tr><td colspan="6" class="empty">Error loading grants.</td></tr>';
@@ -337,6 +494,7 @@ async function toggleGrant(namespace, name, currentlyDisabled) {
     showToast(`Grant ${action}d successfully`);
     loadGrants();
   } catch (err) {
+    if (isUnauthorizedError(err)) return;
     showToast(`Failed to ${action} grant: ${err.message}`, "error");
   }
 }
@@ -396,6 +554,7 @@ async function loadSessions() {
 
     tbody.appendChild(fragment);
   } catch (err) {
+    if (isUnauthorizedError(err)) return;
     console.error("Failed to load sessions:", err);
     document.getElementById("sessions-body").innerHTML =
       '<tr><td colspan="6" class="empty">Error loading sessions.</td></tr>';
@@ -420,6 +579,7 @@ async function toggleSession(namespace, name, currentlyRevoked) {
     showToast(`Session ${action}d successfully`);
     loadSessions();
   } catch (err) {
+    if (isUnauthorizedError(err)) return;
     showToast(`Failed to ${action} session: ${err.message}`, "error");
   }
 }
@@ -474,6 +634,7 @@ async function loadComponents() {
 
     grid.appendChild(fragment);
   } catch (err) {
+    if (isUnauthorizedError(err)) return;
     console.error("Failed to load components:", err);
     grid.innerHTML =
       '<div class="component-card loading">Error loading components.</div>';
@@ -506,6 +667,7 @@ async function restartComponent() {
     select.value = "";
     setTimeout(loadComponents, 3000);
   } catch (err) {
+    if (isUnauthorizedError(err)) return;
     showToast(`Failed to restart component: ${err.message}`, "error");
   }
 }
@@ -551,4 +713,5 @@ document.addEventListener("DOMContentLoaded", () => {
   initGovernance();
   initOperations();
   initModal();
+  initAuth();
 });

@@ -44,8 +44,6 @@ spec:
           envFrom:
             - configMapRef:
                 name: mcp-sentinel-config
-            - secretRef:
-                name: mcp-sentinel-secrets
           env:
             - name: PORT
               value: "8082"
@@ -54,11 +52,18 @@ spec:
                 configMapKeyRef:
                   name: mcp-sentinel-config
                   key: API_BASE
+            - name: API_UPSTREAM
+              value: "http://mcp-sentinel-api.mcp-sentinel.svc.cluster.local:8080"
             - name: API_KEY
               valueFrom:
                 secretKeyRef:
                   name: mcp-sentinel-secrets
                   key: UI_API_KEY
+            - name: API_KEYS
+              valueFrom:
+                secretKeyRef:
+                  name: mcp-sentinel-secrets
+                  key: API_KEYS
             - name: OTEL_SERVICE_NAME
               value: mcp-sentinel-ui
           resources:
