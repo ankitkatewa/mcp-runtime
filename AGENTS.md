@@ -106,6 +106,9 @@ kubectl get secret mcp-sentinel-secrets -n mcp-sentinel \
 - **Secret not found in workload namespace:** copy `mcp-sentinel-secrets` or use a shared secret reference.
 - **Dashboard / API 401:** align `API_KEYS` and `UI_API_KEY` and roll the API deployment.
 - **Ingress / routes:** `kubectl get ingress -A` and confirm paths match the gateway and demo servers you expect.
+- **Prod DNS / ACME:** with `MCP_PLATFORM_DOMAIN=example.com`, setup derives `registry.example.com` and `mcp.example.com`. Both public DNS records must point at the ingress IP and port 80 must reach Traefik for HTTP-01. If cert-manager reports NXDOMAIN, verify from outside and inside the cluster: `getent hosts registry.example.com`, `getent hosts mcp.example.com`, and `kubectl run dns-check --rm -i --restart=Never --image=busybox:1.36 -- nslookup registry.example.com`.
+- **Prod registry 404 / image pulls say “not found”:** if `registry-cert` is Ready but pods fail to pull `registry.<domain>/<repo>:<tag>`, check the public registry route: `curl -k -i https://registry.<domain>/v2/`. Expected is HTTP 200 with `docker-distribution-api-version: registry/2.0`; Traefik `404 page not found` means the ingress/router is not active. Check `kubectl logs -n traefik deploy/traefik --tail=120` and `kubectl get ingress registry -n registry -o yaml`. In prod, the registry ingress must not reference the dev-only `pii-redactor@file` middleware.
+- **Prod MCP server URLs:** prefer path-based public routing for clients: `https://mcp.<domain>/<server-name>/mcp`. Use `spec.publicPathPrefix: <server-name>` and set the server’s `MCP_PATH` to `/<server-name>/mcp`; avoid examples that require a custom `Host` header such as `go.example.local`.
 
 ### Production registry and TLS (debugging)
 
