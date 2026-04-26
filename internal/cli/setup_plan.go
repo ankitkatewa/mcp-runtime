@@ -25,6 +25,12 @@ type SetupPlanInput struct {
 	StrictProd             bool
 	DeployAnalytics        bool
 	OperatorArgs           []string
+	// Let's Encrypt (HTTP-01 via cert-manager). If empty, other TLS modes apply; mutually exclusive with TLSClusterIssuer.
+	ACMEmail    string
+	ACMEStaging bool
+	// TLSClusterIssuer is a pre-existing cert-manager.io ClusterIssuer (e.g. org internal CA / Vault / ADCS). Mutually exclusive with ACMEmail.
+	TLSClusterIssuer   string
+	InstallCertManager bool
 }
 
 // SetupPlan captures the resolved setup decisions.
@@ -41,6 +47,10 @@ type SetupPlan struct {
 	StrictProd          bool
 	DeployAnalytics     bool
 	OperatorArgs        []string
+	ACMEmail            string
+	ACMEStaging         bool
+	TLSClusterIssuer    string
+	InstallCertManager  bool
 }
 
 // BuildSetupPlan resolves CLI inputs into a concrete setup plan.
@@ -80,11 +90,15 @@ func BuildSetupPlan(input SetupPlanInput) SetupPlan {
 			manifest: manifestPath,
 			force:    input.ForceIngressInstall,
 		},
-		RegistryManifest: registryManifest,
-		TLSEnabled:       input.TLSEnabled,
-		TestMode:         input.TestMode,
-		StrictProd:       input.StrictProd,
-		DeployAnalytics:  input.DeployAnalytics,
-		OperatorArgs:     input.OperatorArgs,
+		RegistryManifest:   registryManifest,
+		TLSEnabled:         input.TLSEnabled,
+		TestMode:           input.TestMode,
+		StrictProd:         input.StrictProd,
+		DeployAnalytics:    input.DeployAnalytics,
+		OperatorArgs:       input.OperatorArgs,
+		ACMEmail:           input.ACMEmail,
+		ACMEStaging:        input.ACMEStaging,
+		InstallCertManager: input.InstallCertManager,
+		TLSClusterIssuer:   input.TLSClusterIssuer,
 	}
 }

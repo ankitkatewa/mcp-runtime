@@ -162,7 +162,7 @@ func (m *RegistryManager) newRegistryProvisionCmd() *cobra.Command {
 		},
 	}
 
-	cmd.Flags().StringVar(&url, "url", "", "External registry URL (e.g., registry.example.com)")
+	cmd.Flags().StringVar(&url, "url", "", "External registry URL (e.g., registry.mcpruntime.com)")
 	cmd.Flags().StringVar(&username, "username", "", "Registry username (optional)")
 	cmd.Flags().StringVar(&password, "password", "", "Registry password (optional)")
 	cmd.Flags().StringVar(&operatorImage, "operator-image", "", "Optional: build and push operator image to this external registry (e.g., <registry>/mcp-runtime-operator:latest)")
@@ -412,6 +412,12 @@ func deployRegistry(logger *zap.Logger, namespace string, port int, registryType
 		return wrappedErr
 	}
 	manifest = rewriteRegistryHost(manifest, GetRegistryIngressHost())
+	issuer := GetRegistryClusterIssuerName()
+	manifest = rewriteRegistryClusterIssuerAnnotation(manifest, issuer)
+	if s := strings.TrimSpace(issuer); s != "" && !strings.Contains(manifest, "cert-manager.io/cluster-issuer: "+s) {
+		logger.Warn("registry manifest does not show expected cert-manager.io/cluster-issuer; ingress TLS issuer may be wrong (check overlay for cert-manager.io/cluster-issuer: mcp-runtime-ca)",
+			zap.String("expected_issuer", s))
+	}
 	if overrideImage != "" {
 		logger.Info("Applying registry image override", zap.String("image", overrideImage))
 		updated := strings.Replace(manifest, "image: "+defaultRegistryImage, "image: "+overrideImage, 1)
@@ -473,6 +479,21 @@ func rewriteRegistryHost(manifest, host string) string {
 		return manifest
 	}
 	return strings.ReplaceAll(manifest, "registry.local", host)
+}
+
+// rewriteRegistryClusterIssuerAnnotation sets cert-manager.io/cluster-issuer on the registry Ingress when
+// the TLS overlay is used (value is mcp-runtime-ca in git; replaced during setup for Let's Encrypt or private CA).
+func rewriteRegistryClusterIssuerAnnotation(manifest, issuerName string) string {
+	issuerName = strings.TrimSpace(issuerName)
+	if issuerName == "" {
+		return manifest
+	}
+	const oldLine = "cert-manager.io/cluster-issuer: mcp-runtime-ca"
+	newLine := "cert-manager.io/cluster-issuer: " + issuerName
+	if !strings.Contains(manifest, oldLine) {
+		return manifest
+	}
+	return strings.ReplaceAll(manifest, oldLine, newLine)
 }
 
 func renderKustomizeManifest(kubectl KubectlRunner, manifestPath string) (string, error) {
@@ -688,7 +709,7 @@ func splitImage(image string) (string, string) {
 }
 
 // dropRegistryPrefix removes registry prefix from image repository name
-// Example: "registry.example.com/my-image" -> "my-image"
+// Example: "registry.mcpruntime.com/my-image" -> "my-image"
 func dropRegistryPrefix(repo string) string {
 	parts := strings.Split(repo, "/")
 	if len(parts) <= 1 {

@@ -57,6 +57,16 @@ func TestBuildSetupPlan_DefaultTLS(t *testing.T) {
 	}
 }
 
+func TestBuildSetupPlan_TLSClusterIssuer(t *testing.T) {
+	plan := BuildSetupPlan(SetupPlanInput{
+		TLSEnabled:       true,
+		TLSClusterIssuer: "company-ca",
+	})
+	if plan.TLSClusterIssuer != "company-ca" {
+		t.Fatalf("expected TLSClusterIssuer preserved, got %q", plan.TLSClusterIssuer)
+	}
+}
+
 func TestBuildSetupPlan_CustomIngressManifest(t *testing.T) {
 	plan := BuildSetupPlan(SetupPlanInput{
 		RegistryType:           "docker",
@@ -307,7 +317,7 @@ func TestSetupPlatformWithDeps_ExternalRegistry(t *testing.T) {
 		DeployRegistry:              func(*zap.Logger, string, int, string, string, string) error { rec.add("deploy-registry"); return nil },
 		WaitForDeploymentAvailable:  func(_ *zap.Logger, name, _, _ string, _ time.Duration) error { rec.addWait(name); return nil },
 		PrintDeploymentDiagnostics:  func(string, string, string) { rec.add("diagnostics") },
-		SetupTLS:                    func(*zap.Logger) error { rec.add("tls"); return nil },
+		SetupTLS:                    func(*zap.Logger, SetupPlan) error { rec.add("tls"); return nil },
 		BuildOperatorImage:          func(string) error { rec.add("build"); return nil },
 		PushOperatorImage:           func(string) error { rec.add("push"); return nil },
 		BuildGatewayProxyImage:      func(string) error { rec.add("build-gateway"); return nil },
@@ -389,7 +399,7 @@ func TestSetupPlatformWithDeps_InternalRegistryTLS(t *testing.T) {
 		DeployRegistry:             func(*zap.Logger, string, int, string, string, string) error { rec.add("deploy-registry"); return nil },
 		WaitForDeploymentAvailable: func(_ *zap.Logger, name, _, _ string, _ time.Duration) error { rec.addWait(name); return nil },
 		PrintDeploymentDiagnostics: func(string, string, string) { rec.add("diagnostics") },
-		SetupTLS:                   func(*zap.Logger) error { rec.add("tls"); return nil },
+		SetupTLS:                   func(*zap.Logger, SetupPlan) error { rec.add("tls"); return nil },
 		BuildOperatorImage:         func(string) error { rec.add("build"); return nil },
 		PushOperatorImage:          func(string) error { rec.add("push"); return nil },
 		BuildGatewayProxyImage:     func(string) error { rec.add("build-gateway"); return nil },
@@ -479,7 +489,7 @@ func TestSetupPlatformWithDeps_ExternalRegistryTLS(t *testing.T) {
 		DeployRegistry:             func(*zap.Logger, string, int, string, string, string) error { rec.add("deploy-registry"); return nil },
 		WaitForDeploymentAvailable: func(_ *zap.Logger, name, _, _ string, _ time.Duration) error { rec.addWait(name); return nil },
 		PrintDeploymentDiagnostics: func(string, string, string) { rec.add("diagnostics") },
-		SetupTLS:                   func(*zap.Logger) error { rec.add("tls"); return nil },
+		SetupTLS:                   func(*zap.Logger, SetupPlan) error { rec.add("tls"); return nil },
 		BuildOperatorImage:         func(string) error { rec.add("build"); return nil },
 		PushOperatorImage:          func(string) error { rec.add("push"); return nil },
 		BuildGatewayProxyImage:     func(string) error { rec.add("build-gateway"); return nil },
@@ -570,7 +580,7 @@ func TestSetupPlatformWithDeps_DiagnosticsOnRegistryWaitFailure(t *testing.T) {
 			return nil
 		},
 		PrintDeploymentDiagnostics: func(string, string, string) { rec.add("diagnostics") },
-		SetupTLS:                   func(*zap.Logger) error { return nil },
+		SetupTLS:                   func(*zap.Logger, SetupPlan) error { return nil },
 		BuildOperatorImage:         func(string) error { return nil },
 		PushOperatorImage:          func(string) error { return nil },
 		BuildGatewayProxyImage:     func(string) error { return nil },
@@ -630,7 +640,7 @@ func TestSetupPlatformWithDeps_DiagnosticsOnOperatorWaitFailure(t *testing.T) {
 			return nil
 		},
 		PrintDeploymentDiagnostics: func(string, string, string) { rec.add("diagnostics") },
-		SetupTLS:                   func(*zap.Logger) error { return nil },
+		SetupTLS:                   func(*zap.Logger, SetupPlan) error { return nil },
 		BuildOperatorImage:         func(string) error { return nil },
 		PushOperatorImage:          func(string) error { return nil },
 		BuildGatewayProxyImage:     func(string) error { return nil },
@@ -689,7 +699,7 @@ func TestSetupPlatformWithDeps_CRDCheckFailure(t *testing.T) {
 			return nil
 		},
 		PrintDeploymentDiagnostics: func(string, string, string) { rec.add("diagnostics") },
-		SetupTLS:                   func(*zap.Logger) error { return nil },
+		SetupTLS:                   func(*zap.Logger, SetupPlan) error { return nil },
 		BuildOperatorImage:         func(string) error { return nil },
 		PushOperatorImage:          func(string) error { return nil },
 		BuildGatewayProxyImage:     func(string) error { return nil },
@@ -750,7 +760,7 @@ func TestSetupPlatformWithDeps_InternalRegistryPushFailure(t *testing.T) {
 			return nil
 		},
 		PrintDeploymentDiagnostics: func(string, string, string) { rec.add("diagnostics") },
-		SetupTLS:                   func(*zap.Logger) error { return nil },
+		SetupTLS:                   func(*zap.Logger, SetupPlan) error { return nil },
 		BuildOperatorImage:         func(string) error { rec.add("build"); return nil },
 		PushOperatorImage:          func(string) error { rec.add("push"); return nil },
 		BuildGatewayProxyImage:     func(string) error { rec.add("build-gateway"); return nil },
