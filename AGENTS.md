@@ -87,7 +87,14 @@ kubectl get secret mcp-sentinel-secrets -n mcp-sentinel \
 
 ### Platform domain and TLS (short)
 
-- **Let’s Encrypt:** `./bin/mcp-runtime setup --with-tls --acme-email <addr>`. Set `MCP_PLATFORM_DOMAIN` to an apex (e.g. `mcpruntime.com`) and DNS for `registry.<domain>` and `mcp.<domain>`, or set `MCP_REGISTRY_HOST` / `MCP_REGISTRY_INGRESS_HOST` for public names. Port 80 must hit Traefik for HTTP-01. With a platform domain, cert-manager can issue one `Certificate` with both SANs; the `registry-tls` `Secret` lives in the `registry` namespace (copy to other namespaces if the `mcp.` `Ingress` is elsewhere). Staging: `--acme-staging` / `MCP_ACME_STAGING=1`. Private CA without ACME: omit `--acme-email` and use the `mcp-runtime-ca` path per `config/cert-manager/`.
+- **What `MCP_PLATFORM_DOMAIN` does:** with `export MCP_PLATFORM_DOMAIN=mcpruntime.org` (apex only, no `https://`), the CLI/operator resolve **registry** and **MCP** hostnames as:
+  - `registry.mcpruntime.org` (image pulls and registry ingress)
+  - `mcp.mcpruntime.org` (default ingress host for `MCPServer` when you use host-based routing)
+- **Expected public URLs (after DNS and TLS):**
+  - Registry: `https://registry.mcpruntime.org` (or HTTP before TLS, depending on overlay)
+  - Each MCP server (default `IngressPath` is `/{metadata.name}/mcp`): e.g. `https://mcp.mcpruntime.org/demo-one/mcp` for a server named `demo-one` in the default shape
+- **Let’s Encrypt and DNS:** the setup TLS flow requests a single `Certificate` (both **SANs**: `registry.<domain>` and `mcp.<domain>`) when both names are in env-derived config. **Both** public DNS A/AAAA (or CNAME) records must exist and point to the **same** public ingress IP (or stable LB). A typo in DNS (e.g. `regsitry` instead of **registry**) will break the matching hostname. Port **80** must hit Traefik for **HTTP-01** before a cert is issued.
+- **Run:** `./bin/mcp-runtime setup --with-tls --acme-email <addr>`. You can set `MCP_PLATFORM_DOMAIN` as above, or set `MCP_REGISTRY_INGRESS_HOST` / `MCP_MCP_INGRESS_HOST` (and related) if you do not use the platform domain. Staging: `--acme-staging` / `MCP_ACME_STAGING=1`. The `registry-tls` `Secret` lives in the `registry` namespace (copy to other namespaces if the `mcp.` `Ingress` is elsewhere). Private CA without ACME: omit `--acme-email` and use the `mcp-runtime-ca` path per `config/cert-manager/`.
 - **Internal / enterprise CA:** Install your `ClusterIssuer` first, then: `--with-tls --tls-cluster-issuer <name>` (or `MCP_TLS_CLUSTER_ISSUER`). Setup does not create the issuer; it applies the `Certificate` and waits. Mutually exclusive with `--acme-email`.
 - **Operator default host:** `MCP_PLATFORM_DOMAIN` and related env can drive `MCP_DEFAULT_INGRESS_HOST` to `mcp.<domain>` when configured.
 
@@ -99,6 +106,22 @@ kubectl get secret mcp-sentinel-secrets -n mcp-sentinel \
 - **Secret not found in workload namespace:** copy `mcp-sentinel-secrets` or use a shared secret reference.
 - **Dashboard / API 401:** align `API_KEYS` and `UI_API_KEY` and roll the API deployment.
 - **Ingress / routes:** `kubectl get ingress -A` and confirm paths match the gateway and demo servers you expect.
+
+### Production registry and TLS (debugging)
+
+For production with `MCP_PLATFORM_DOMAIN=example.com`, setup derives hostnames `registry.example.com` and `mcp.example.com`. MCP server base URLs are `https://mcp.example.com/<server_name>/mcp` (default path shape). **Both** DNS names must exist publicly and point to your ingress IP.
+
+- **Cert-manager / NXDOMAIN:** if challenges fail with missing DNS, verify from your laptop and from inside the cluster:
+  - `getent hosts registry.example.com` and `getent hosts mcp.example.com`
+  - `kubectl run dns-check --rm -i --restart=Never --image=busybox:1.36 -- nslookup registry.example.com`
+- **`registry-cert` Ready but image pulls `not found`:** confirm the public registry URL actually routes to the distribution service (not a dead Traefik router). The registry **Ingress** must not reference middleware that is not installed on the Traefik instance serving prod (the base registry ingress does not attach the PII redactor; that middleware exists only in the `config/ingress/overlays/http` dev Traefik stack).
+  - `curl -k -i https://registry.example.com/v2/` should return **HTTP 200** and header `docker-distribution-api-version: registry/2.0`. A Traefik **404 page not found** means the registry router is not active (fix ingress annotations or Traefik before debugging registry data).
+- **Traefik logs:** `kubectl logs -n traefik deploy/traefik --tail=120` (or k3s Traefik in `kube-system` if you use the bundled service). If you see `middleware "pii-redactor@file" does not exist` on a route that should be the registry, ensure the live **registry** `Ingress` does not set `traefik.ingress.kubernetes.io/router.middlewares: pii-redactor@file` for prod Traefik.
+- **Live registry ingress:** `kubectl get ingress registry -n registry -o yaml` and confirm `spec.rules` host and TLS match your domain.
+- **Pushed image visibility:** `curl -k -I https://registry.example.com/v2/<repo>/manifests/<tag>` (expect 200 or 404 from the registry, not from Traefik’s default backend).
+- **Sentinel rollouts after fixes:** `kubectl rollout status deployment/mcp-sentinel-ingest deployment/mcp-sentinel-api deployment/mcp-sentinel-processor deployment/mcp-sentinel-ui -n mcp-sentinel --timeout=90s`
+
+**Expected when healthy:** `curl -k -i https://registry.<domain>/v2/` returns 200 with `registry/2.0`; `kubectl get certificate registry-cert -n registry -o wide` shows `Ready=True`; mcp-sentinel pods are `1/1` `Running`; `mcp-runtime setup` ends with `Platform setup complete`.
 
 ## Governance (grants and sessions)
 
