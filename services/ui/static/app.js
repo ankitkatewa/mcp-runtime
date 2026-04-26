@@ -1,5 +1,11 @@
 const apiBase = window.MCP_API_BASE || "/api";
+const defaults = Object.assign(
+  { namespace: "mcp-servers", policyVersion: "v1" },
+  window.MCP_DEFAULTS || {}
+);
 let authenticated = null;
+let grantsCache = [];
+let sessionsCache = [];
 
 // API Helper
 async function fetchJSON(path, options = {}) {
@@ -123,13 +129,6 @@ async function loadDashboardSummary() {
       data.active_grants || 0;
     document.getElementById("dash-active-sessions").textContent =
       data.active_sessions || 0;
-
-    // Also update old hero card for backward compatibility
-    if (document.getElementById("total-events")) {
-      document.getElementById("total-events").textContent = formatNumber(
-        data.total_events || 0
-      );
-    }
   } catch (err) {
     if (isUnauthorizedError(err)) return;
     console.error("Failed to load dashboard summary:", err);
@@ -424,56 +423,63 @@ function stopAutoRefresh() {
 async function loadGrants() {
   try {
     const data = await fetchJSON("/runtime/grants");
-    const tbody = document.getElementById("grants-body");
-    const filter = document.getElementById("grant-filter")?.value.toLowerCase() || "";
-
-    if (!data.grants || data.grants.length === 0) {
-      tbody.innerHTML =
-        '<tr><td colspan="6" class="empty">No grants found.</td></tr>';
-      return;
-    }
-
-    const filtered = data.grants.filter((g) => {
-      if (!filter) return true;
-      const search = `${g.serverRef?.name} ${g.subject?.humanID} ${g.subject?.agentID}`.toLowerCase();
-      return search.includes(filter);
-    });
-
-    if (filtered.length === 0) {
-      tbody.innerHTML =
-        '<tr><td colspan="6" class="empty">No grants match filter.</td></tr>';
-      return;
-    }
-
-    tbody.innerHTML = "";
-    const fragment = document.createDocumentFragment();
-
-    filtered.forEach((grant) => {
-      const subject = grant.subject?.humanID || grant.subject?.agentID || "-";
-      const status = grant.disabled ? "Disabled" : "Active";
-      const statusClass = grant.disabled ? "badge-muted" : "badge-success";
-
-      const row = document.createElement("tr");
-      row.appendChild(createTextCell(grant.name || "-"));
-      row.appendChild(createTextCell(grant.serverRef?.name || "-"));
-      row.appendChild(createTextCell(subject));
-      row.appendChild(createTextCell(grant.maxTrust || "-"));
-      row.appendChild(createBadgeCell(status, statusClass));
-      row.appendChild(
-        createActionCell(grant.disabled ? "Enable" : "Disable", () =>
-          toggleGrant(grant.namespace || "", grant.name || "", grant.disabled)
-        )
-      );
-      fragment.appendChild(row);
-    });
-
-    tbody.appendChild(fragment);
+    grantsCache = Array.isArray(data.grants) ? data.grants : [];
+    renderGrants();
   } catch (err) {
     if (isUnauthorizedError(err)) return;
     console.error("Failed to load grants:", err);
+    grantsCache = [];
     document.getElementById("grants-body").innerHTML =
       '<tr><td colspan="6" class="empty">Error loading grants.</td></tr>';
   }
+}
+
+function renderGrants() {
+  const tbody = document.getElementById("grants-body");
+  if (!tbody) return;
+  const filter = document.getElementById("grant-filter")?.value.toLowerCase() || "";
+
+  if (grantsCache.length === 0) {
+    tbody.innerHTML = '<tr><td colspan="6" class="empty">No grants found.</td></tr>';
+    return;
+  }
+
+  const filtered = grantsCache.filter((g) => {
+    if (!filter) return true;
+    const search = `${g.name || ""} ${g.serverRef?.name || ""} ${
+      g.subject?.humanID || ""
+    } ${g.subject?.agentID || ""}`.toLowerCase();
+    return search.includes(filter);
+  });
+
+  if (filtered.length === 0) {
+    tbody.innerHTML = '<tr><td colspan="6" class="empty">No grants match filter.</td></tr>';
+    return;
+  }
+
+  tbody.innerHTML = "";
+  const fragment = document.createDocumentFragment();
+
+  filtered.forEach((grant) => {
+    const subject = grant.subject?.humanID || grant.subject?.agentID || "-";
+    const status = grant.disabled ? "Disabled" : "Active";
+    const statusClass = grant.disabled ? "badge-muted" : "badge-success";
+
+    const row = document.createElement("tr");
+    row.appendChild(createTextCell(grant.name || "-"));
+    row.appendChild(createTextCell(grant.serverRef?.name || "-"));
+    row.appendChild(createTextCell(subject));
+    row.appendChild(createTextCell(grant.maxTrust || "-"));
+    row.appendChild(createBadgeCell(status, statusClass));
+    row.appendChild(
+      createActionCell(grant.disabled ? "Enable" : "Disable", () =>
+        toggleGrant(grant.namespace || "", grant.name || "", grant.disabled)
+      )
+    );
+    fragment.appendChild(row);
+  });
+
+  tbody.appendChild(fragment);
 }
 
 async function toggleGrant(namespace, name, currentlyDisabled) {
@@ -499,66 +505,161 @@ async function toggleGrant(namespace, name, currentlyDisabled) {
   }
 }
 
+async function applyGrant(event) {
+  event.preventDefault();
+  const submit = event.submitter;
+  if (submit?.disabled) return;
+
+  const name = fieldValue("grant-name");
+  const server = fieldValue("grant-server");
+  if (!name || !server) {
+    showToast("Grant name and server are required.", "error");
+    return;
+  }
+  const humanID = fieldValue("grant-human");
+  const agentID = fieldValue("grant-agent");
+  if (!humanID && !agentID) {
+    showToast("Provide at least one of Human ID or Agent ID.", "error");
+    return;
+  }
+
+  let toolRules;
+  try {
+    toolRules = parseToolRules(fieldValue("grant-tool-rules"));
+  } catch (parseErr) {
+    showToast(parseErr.message, "error");
+    return;
+  }
+
+  if (submit) submit.disabled = true;
+  try {
+    const payload = {
+      name,
+      namespace: fieldValue("grant-namespace") || defaults.namespace,
+      serverRef: {
+        name: server,
+        namespace: fieldValue("grant-server-namespace"),
+      },
+      subject: { humanID, agentID },
+      maxTrust: fieldValue("grant-trust"),
+      policyVersion: fieldValue("grant-policy-version") || defaults.policyVersion,
+      toolRules,
+    };
+    await fetchJSON("/runtime/grants", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    });
+    showToast(`Grant "${payload.name}" applied successfully`);
+    document.getElementById("grant-form")?.reset();
+    setFieldValue("grant-namespace", defaults.namespace);
+    setFieldValue("grant-policy-version", defaults.policyVersion);
+    document.getElementById("grant-form")?.classList.add("hidden");
+    loadGrants();
+    loadDashboardSummary();
+  } catch (err) {
+    if (isUnauthorizedError(err)) return;
+    showToast(`Failed to apply grant: ${err.message}`, "error");
+  } finally {
+    if (submit) submit.disabled = false;
+  }
+}
+
+function parseToolRules(text) {
+  return text
+    .split("\n")
+    .map((line) => line.trim())
+    .filter(Boolean)
+    .map((line) => {
+      const parts = line.split(":").map((part) => part.trim());
+      let decision = parts.pop()?.toLowerCase() || "";
+      let requiredTrust = "";
+      const trustLevels = new Set(["low", "medium", "high"]);
+      const decisions = new Set(["allow", "deny"]);
+      if (!decisions.has(decision) && trustLevels.has(decision) && parts.length >= 2) {
+        requiredTrust = decision;
+        decision = parts.pop()?.toLowerCase() || "";
+      }
+      const name = parts.join(":").trim();
+      if (!name || !decisions.has(decision) || (requiredTrust && !trustLevels.has(requiredTrust))) {
+        throw new Error(
+          `Invalid tool rule "${line}". Use <name>:allow or <name>:deny or <name>:allow:<trust> (names may include ":"; decision is allow or deny; trust is low, medium, or high).`
+        );
+      }
+      const rule = { name, decision };
+      if (requiredTrust) {
+        rule.requiredTrust = requiredTrust;
+      }
+      return rule;
+    });
+}
+
 // Governance - Sessions
 async function loadSessions() {
   try {
     const data = await fetchJSON("/runtime/sessions");
-    const tbody = document.getElementById("sessions-body");
-    const filter =
-      document.getElementById("session-filter")?.value.toLowerCase() || "";
-
-    if (!data.sessions || data.sessions.length === 0) {
-      tbody.innerHTML =
-        '<tr><td colspan="6" class="empty">No sessions found.</td></tr>';
-      return;
-    }
-
-    const filtered = data.sessions.filter((s) => {
-      if (!filter) return true;
-      const search = `${s.serverRef?.name} ${s.subject?.humanID} ${s.subject?.agentID}`.toLowerCase();
-      return search.includes(filter);
-    });
-
-    if (filtered.length === 0) {
-      tbody.innerHTML =
-        '<tr><td colspan="6" class="empty">No sessions match filter.</td></tr>';
-      return;
-    }
-
-    tbody.innerHTML = "";
-    const fragment = document.createDocumentFragment();
-
-    filtered.forEach((session) => {
-      const subject =
-        session.subject?.humanID || session.subject?.agentID || "-";
-      const status = session.revoked ? "Revoked" : "Active";
-      const statusClass = session.revoked ? "badge-error" : "badge-success";
-
-      const row = document.createElement("tr");
-      row.appendChild(createTextCell(session.name || "-"));
-      row.appendChild(createTextCell(session.serverRef?.name || "-"));
-      row.appendChild(createTextCell(subject));
-      row.appendChild(createTextCell(session.consentedTrust || "-"));
-      row.appendChild(createBadgeCell(status, statusClass));
-      row.appendChild(
-        createActionCell(session.revoked ? "Unrevoke" : "Revoke", () =>
-          toggleSession(
-            session.namespace || "",
-            session.name || "",
-            session.revoked
-          )
-        )
-      );
-      fragment.appendChild(row);
-    });
-
-    tbody.appendChild(fragment);
+    sessionsCache = Array.isArray(data.sessions) ? data.sessions : [];
+    renderSessions();
   } catch (err) {
     if (isUnauthorizedError(err)) return;
     console.error("Failed to load sessions:", err);
+    sessionsCache = [];
     document.getElementById("sessions-body").innerHTML =
       '<tr><td colspan="6" class="empty">Error loading sessions.</td></tr>';
   }
+}
+
+function renderSessions() {
+  const tbody = document.getElementById("sessions-body");
+  if (!tbody) return;
+  const filter = document.getElementById("session-filter")?.value.toLowerCase() || "";
+
+  if (sessionsCache.length === 0) {
+    tbody.innerHTML = '<tr><td colspan="6" class="empty">No sessions found.</td></tr>';
+    return;
+  }
+
+  const filtered = sessionsCache.filter((s) => {
+    if (!filter) return true;
+    const search = `${s.name || ""} ${s.serverRef?.name || ""} ${
+      s.subject?.humanID || ""
+    } ${s.subject?.agentID || ""}`.toLowerCase();
+    return search.includes(filter);
+  });
+
+  if (filtered.length === 0) {
+    tbody.innerHTML = '<tr><td colspan="6" class="empty">No sessions match filter.</td></tr>';
+    return;
+  }
+
+  tbody.innerHTML = "";
+  const fragment = document.createDocumentFragment();
+
+  filtered.forEach((session) => {
+    const subject =
+      session.subject?.humanID || session.subject?.agentID || "-";
+    const status = session.revoked ? "Revoked" : "Active";
+    const statusClass = session.revoked ? "badge-error" : "badge-success";
+
+    const row = document.createElement("tr");
+    row.appendChild(createTextCell(session.name || "-"));
+    row.appendChild(createTextCell(session.serverRef?.name || "-"));
+    row.appendChild(createTextCell(subject));
+    row.appendChild(createTextCell(session.consentedTrust || "-"));
+    row.appendChild(createBadgeCell(status, statusClass));
+    row.appendChild(
+      createActionCell(session.revoked ? "Unrevoke" : "Revoke", () =>
+        toggleSession(
+          session.namespace || "",
+          session.name || "",
+          session.revoked
+        )
+      )
+    );
+    fragment.appendChild(row);
+  });
+
+  tbody.appendChild(fragment);
 }
 
 async function toggleSession(namespace, name, currentlyRevoked) {
@@ -584,14 +685,146 @@ async function toggleSession(namespace, name, currentlyRevoked) {
   }
 }
 
+async function applySession(event) {
+  event.preventDefault();
+  const submit = event.submitter;
+  if (submit?.disabled) return;
+
+  const name = fieldValue("session-name");
+  const server = fieldValue("session-server");
+  if (!name || !server) {
+    showToast("Session name and server are required.", "error");
+    return;
+  }
+  const humanID = fieldValue("session-human");
+  const agentID = fieldValue("session-agent");
+  if (!humanID && !agentID) {
+    showToast("Provide at least one of Human ID or Agent ID.", "error");
+    return;
+  }
+
+  let expiresAt;
+  try {
+    expiresAt = dateTimeLocalToISOString(fieldValue("session-expires-at"));
+  } catch (parseErr) {
+    showToast(parseErr.message, "error");
+    return;
+  }
+
+  if (submit) submit.disabled = true;
+  try {
+    const payload = {
+      name,
+      namespace: fieldValue("session-namespace") || defaults.namespace,
+      serverRef: {
+        name: server,
+        namespace: fieldValue("session-server-namespace"),
+      },
+      subject: { humanID, agentID },
+      consentedTrust: fieldValue("session-trust"),
+      policyVersion: fieldValue("session-policy-version") || defaults.policyVersion,
+    };
+    if (expiresAt) {
+      payload.expiresAt = expiresAt;
+    }
+
+    await fetchJSON("/runtime/sessions", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    });
+    showToast(`Session "${payload.name}" applied successfully`);
+    document.getElementById("session-form")?.reset();
+    setFieldValue("session-namespace", defaults.namespace);
+    setFieldValue("session-policy-version", defaults.policyVersion);
+    document.getElementById("session-form")?.classList.add("hidden");
+    loadSessions();
+    loadDashboardSummary();
+  } catch (err) {
+    if (isUnauthorizedError(err)) return;
+    showToast(`Failed to apply session: ${err.message}`, "error");
+  } finally {
+    if (submit) submit.disabled = false;
+  }
+}
+
+function fieldValue(id) {
+  return document.getElementById(id)?.value.trim() || "";
+}
+
+function setFieldValue(id, value) {
+  const input = document.getElementById(id);
+  if (input) {
+    input.value = value;
+  }
+}
+
+function dateTimeLocalToISOString(value) {
+  if (!value) {
+    return "";
+  }
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) {
+    throw new Error("Expires At must be a valid date and time.");
+  }
+  return date.toISOString();
+}
+
+function updateSessionExpiresUTCHint() {
+  const hint = document.getElementById("session-expires-utc");
+  if (!hint) {
+    return;
+  }
+  const val = fieldValue("session-expires-at");
+  if (!val) {
+    hint.textContent = "";
+    hint.classList.add("hidden");
+    return;
+  }
+  try {
+    const iso = dateTimeLocalToISOString(val);
+    hint.textContent = `Sent to API as UTC: ${iso}`;
+    hint.classList.remove("hidden");
+  } catch {
+    hint.textContent = "";
+    hint.classList.add("hidden");
+  }
+}
+
 function initGovernance() {
+  setFieldValue("grant-namespace", defaults.namespace);
+  setFieldValue("grant-policy-version", defaults.policyVersion);
+  setFieldValue("session-namespace", defaults.namespace);
+  setFieldValue("session-policy-version", defaults.policyVersion);
+
+  document
+    .getElementById("session-expires-at")
+    ?.addEventListener("input", updateSessionExpiresUTCHint);
+  document
+    .getElementById("session-expires-at")
+    ?.addEventListener("change", updateSessionExpiresUTCHint);
+
   document.getElementById("refresh-grants")?.addEventListener("click", loadGrants);
   document.getElementById("refresh-sessions")?.addEventListener("click", loadSessions);
-  const debouncedLoadGrants = debounce(loadGrants, 200);
-  const debouncedLoadSessions = debounce(loadSessions, 200);
+  document.getElementById("show-grant-form")?.addEventListener("click", () => {
+    document.getElementById("grant-form")?.classList.toggle("hidden");
+  });
+  document.getElementById("cancel-grant-form")?.addEventListener("click", () => {
+    document.getElementById("grant-form")?.classList.add("hidden");
+  });
+  document.getElementById("grant-form")?.addEventListener("submit", applyGrant);
+  document.getElementById("show-session-form")?.addEventListener("click", () => {
+    document.getElementById("session-form")?.classList.toggle("hidden");
+  });
+  document.getElementById("cancel-session-form")?.addEventListener("click", () => {
+    document.getElementById("session-form")?.classList.add("hidden");
+  });
+  document.getElementById("session-form")?.addEventListener("submit", applySession);
 
-  document.getElementById("grant-filter")?.addEventListener("input", debouncedLoadGrants);
-  document.getElementById("session-filter")?.addEventListener("input", debouncedLoadSessions);
+  const debouncedRenderGrants = debounce(renderGrants, 80);
+  const debouncedRenderSessions = debounce(renderSessions, 80);
+  document.getElementById("grant-filter")?.addEventListener("input", debouncedRenderGrants);
+  document.getElementById("session-filter")?.addEventListener("input", debouncedRenderSessions);
 }
 
 // Operations - Components

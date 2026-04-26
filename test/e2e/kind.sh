@@ -1872,8 +1872,8 @@ echo "[cli][pass] server status contains ${SERVER_NAME}"
 
 ./bin/mcp-runtime server logs "${SERVER_NAME}" --namespace mcp-servers >"${WORKDIR}/${SERVER_NAME}.logs"
 
-echo "[policy] applying access grant and low-trust session"
-cat <<EOF | kubectl apply -f -
+echo "[policy] applying access grant via CLI"
+cat >"${WORKDIR}/access-grant.yaml" <<EOF
 apiVersion: mcpruntime.org/v1alpha1
 kind: MCPAccessGrant
 metadata:
@@ -1894,7 +1894,11 @@ spec:
       decision: allow
     - name: upper
       decision: allow
----
+EOF
+(cd "${WORKDIR}" && "${PROJECT_ROOT}/bin/mcp-runtime" access grant apply --file access-grant.yaml)
+
+echo "[policy] applying low-trust session via CLI"
+cat >"${WORKDIR}/access-session.yaml" <<EOF
 apiVersion: mcpruntime.org/v1alpha1
 kind: MCPAgentSession
 metadata:
@@ -1909,6 +1913,7 @@ spec:
   consentedTrust: low
   policyVersion: v1
 EOF
+(cd "${WORKDIR}" && "${PROJECT_ROOT}/bin/mcp-runtime" access session apply --file access-session.yaml)
 
 wait_for_policy_text "\"name\": \"${SESSION_ID}\""
 wait_for_policy_text "\"consented_trust\": \"low\""
@@ -2153,7 +2158,7 @@ from datetime import datetime, timedelta, timezone
 print((datetime.now(timezone.utc) - timedelta(minutes=5)).replace(microsecond=0).isoformat().replace("+00:00", "Z"))
 PY
 )"
-  cat <<EOF | kubectl apply -f -
+  cat >"${WORKDIR}/access-session-expired.yaml" <<EOF
 apiVersion: mcpruntime.org/v1alpha1
 kind: MCPAgentSession
 metadata:
@@ -2169,13 +2174,14 @@ spec:
   policyVersion: v1
   expiresAt: ${EXPIRED_AT}
 EOF
+  (cd "${WORKDIR}" && "${PROJECT_ROOT}/bin/mcp-runtime" access session apply --file access-session-expired.yaml)
   wait_for_policy_text "\"expires_at\": \"${EXPIRED_AT}\""
   print_gateway_policy_debug
   wait_for_mcp_tool_result "${MCP_SESSION_URL}" "aaa-ping" '{}' 401 "session_expired"
   run_mcp_smoke_expect "mcp-smoke-session-expired" "${MCP_SESSION_URL}" false "session_expired"
 
   echo "[policy] restoring non-expired access session"
-  cat <<EOF | kubectl apply -f -
+  cat >"${WORKDIR}/access-session-restored.yaml" <<EOF
 apiVersion: mcpruntime.org/v1alpha1
 kind: MCPAgentSession
 metadata:
@@ -2190,6 +2196,7 @@ spec:
   consentedTrust: low
   policyVersion: v1
 EOF
+  (cd "${WORKDIR}" && "${PROJECT_ROOT}/bin/mcp-runtime" access session apply --file access-session-restored.yaml)
   wait_for_mcp_tool_result "${MCP_SESSION_URL}" "aaa-ping" '{}' 200
 
   echo "[policy] disabling access grant via CLI"
@@ -2426,7 +2433,7 @@ EOF
   fi
 
   echo "[policy] updating access grant to deny aaa-ping and echo"
-  cat <<EOF | kubectl apply -f -
+  cat >"${WORKDIR}/access-grant-deny.yaml" <<EOF
 apiVersion: mcpruntime.org/v1alpha1
 kind: MCPAccessGrant
 metadata:
@@ -2448,6 +2455,7 @@ spec:
     - name: upper
       decision: allow
 EOF
+  (cd "${WORKDIR}" && "${PROJECT_ROOT}/bin/mcp-runtime" access grant apply --file access-grant-deny.yaml)
 
   wait_for_grant_tool_rule "${SERVER_NAME}-grant" "aaa-ping" "deny"
   wait_for_grant_tool_rule "${SERVER_NAME}-grant" "echo" "deny"
@@ -2781,6 +2789,66 @@ PY
 
   echo "[oauth] validating valid bearer token MCP flow"
   wait_for_mcp_tool_result "${MCP_OAUTH_VALID_URL}" "add" '{"a":7,"b":5}' 200 "12"
+  API_BASE="http://127.0.0.1:${SENTINEL_PORT}/api" \
+  API_KEY="${API_KEY}" \
+  OAUTH_SERVER_NAME="${OAUTH_SERVER_NAME}" \
+  OAUTH_HUMAN_ID="${OAUTH_HUMAN_ID}" \
+  OAUTH_AGENT_ID="${OAUTH_AGENT_ID}" \
+  OAUTH_SESSION_ID="${OAUTH_SESSION_ID}" \
+  python3 <<'PY'
+import json
+import os
+import time
+import urllib.parse
+import urllib.request
+
+
+import os as _os; exec(open(_os.environ["E2E_HELPERS"]).read())
+
+
+api_base = os.environ["API_BASE"]
+api_key = os.environ["API_KEY"]
+server_name = os.environ["OAUTH_SERVER_NAME"]
+human_id = os.environ["OAUTH_HUMAN_ID"]
+agent_id = os.environ["OAUTH_AGENT_ID"]
+session_id = os.environ["OAUTH_SESSION_ID"]
+
+params = urllib.parse.urlencode(
+    {
+        "server": server_name,
+        "decision": "allow",
+        "tool_name": "add",
+        "human_id": human_id,
+        "agent_id": agent_id,
+        "session_id": session_id,
+        "limit": "20",
+    }
+)
+url = f"{api_base}/events/filter?{params}"
+headers = {"x-api-key": api_key}
+last_doc = {}
+
+for _ in range(60):
+    req = urllib.request.Request(url, headers=headers)
+    with urllib.request.urlopen(req, timeout=10) as resp:
+        last_doc = json.loads(resp.read().decode())
+    events = last_doc.get("events", [])
+    if events:
+        payload = events[0].get("payload", {})
+        check(
+            payload.get("human_id") == human_id
+            and payload.get("agent_id") == agent_id
+            and payload.get("session_id") == session_id
+            and payload.get("tool_name") == "add"
+            and payload.get("decision") == "allow",
+            "oauth bearer token identity appeared in allow audit event",
+            f"unexpected oauth allow audit payload: {payload}",
+        )
+        break
+    time.sleep(2)
+else:
+    fail(f"timed out waiting for oauth allow audit event: {json.dumps(last_doc, indent=2)}")
+PY
   wait_for_http_result \
     "${MCP_OAUTH_DIRECT_URL}" \
     POST \
@@ -3073,6 +3141,95 @@ check(
     session_id in session_names,
     f"runtime sessions contain {session_id}",
     f"runtime sessions missing {session_id}: {sessions}",
+)
+not_a_server = f"{server_name}-e2e-not-mcpserver"
+bad_grant_body = expect_status(
+    f"{api_base}/api/runtime/grants",
+    400,
+    method="POST",
+    headers=auth_headers,
+    body={
+        "name": f"{server_name}-e2e-bad-grant",
+        "namespace": "mcp-servers",
+        "serverRef": {"name": not_a_server, "namespace": "mcp-servers"},
+        "subject": {"humanID": human_id, "agentID": agent_id},
+        "maxTrust": "low",
+        "toolRules": [{"name": "add", "decision": "allow", "requiredTrust": "low"}],
+    },
+)
+check(
+    "unknown serverRef" in bad_grant_body,
+    "POST /api/runtime/grants rejects unknown serverRef",
+    f"body: {bad_grant_body}",
+)
+bad_session_body = expect_status(
+    f"{api_base}/api/runtime/sessions",
+    400,
+    method="POST",
+    headers=auth_headers,
+    body={
+        "name": f"{server_name}-e2e-bad-session",
+        "namespace": "mcp-servers",
+        "serverRef": {"name": not_a_server, "namespace": "mcp-servers"},
+        "subject": {"humanID": human_id, "agentID": agent_id},
+        "consentedTrust": "low",
+    },
+)
+check(
+    "unknown serverRef" in bad_session_body,
+    "POST /api/runtime/sessions rejects unknown serverRef",
+    f"body: {bad_session_body}",
+)
+api_runtime_grant = f"{server_name}-e2e-api-grant"
+api_runtime_session = f"{server_name}-e2e-api-session"
+created_grant = expect_json(
+    f"{api_base}/api/runtime/grants",
+    method="POST",
+    headers=auth_headers,
+    body={
+        "name": api_runtime_grant,
+        "namespace": "mcp-servers",
+        "serverRef": {"name": server_name, "namespace": "mcp-servers"},
+        "subject": {"humanID": human_id, "agentID": agent_id},
+        "maxTrust": "low",
+        "toolRules": [{"name": "add", "decision": "allow", "requiredTrust": "low"}],
+    },
+)
+check(
+    created_grant.get("grant", {}).get("name") == api_runtime_grant,
+    "POST /api/runtime/grants created grant",
+    f"body: {created_grant}",
+)
+created_session = expect_json(
+    f"{api_base}/api/runtime/sessions",
+    method="POST",
+    headers=auth_headers,
+    body={
+        "name": api_runtime_session,
+        "namespace": "mcp-servers",
+        "serverRef": {"name": server_name, "namespace": "mcp-servers"},
+        "subject": {"humanID": human_id, "agentID": agent_id},
+        "consentedTrust": "low",
+    },
+)
+check(
+    created_session.get("session", {}).get("name") == api_runtime_session,
+    "POST /api/runtime/sessions created session",
+    f"body: {created_session}",
+)
+grants_after = expect_json(f"{api_base}/api/runtime/grants", headers=auth_headers)
+grant_names_after = {item.get("name") for item in grants_after.get("grants", [])}
+check(
+    api_runtime_grant in grant_names_after,
+    "list grants after API create",
+    f"missing {api_runtime_grant}: {grants_after}",
+)
+sessions_after = expect_json(f"{api_base}/api/runtime/sessions", headers=auth_headers)
+session_names_after = {item.get("name") for item in sessions_after.get("sessions", [])}
+check(
+    api_runtime_session in session_names_after,
+    "list sessions after API create",
+    f"missing {api_runtime_session}: {sessions_after}",
 )
 components = expect_json(f"{api_base}/api/runtime/components", headers=auth_headers)
 component_keys = {item.get("key") for item in components.get("components", [])}

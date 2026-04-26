@@ -3,9 +3,14 @@ package access
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"strings"
 
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
+	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/dynamic"
@@ -17,11 +22,15 @@ const (
 	APIVersion            = "v1alpha1"
 	AccessGrantResource   = "mcpaccessgrants"
 	AccessSessionResource = "mcpagentsessions"
+	MCPServerResource     = "mcpservers"
+	// DefaultMCPResourceNamespace is used when a ServerReference or access resource omits a namespace.
+	DefaultMCPResourceNamespace = "mcp-servers"
 )
 
 var (
 	grantGVR   = schema.GroupVersionResource{Group: APIGroup, Version: APIVersion, Resource: AccessGrantResource}
 	sessionGVR = schema.GroupVersionResource{Group: APIGroup, Version: APIVersion, Resource: AccessSessionResource}
+	serverGVR  = schema.GroupVersionResource{Group: APIGroup, Version: APIVersion, Resource: MCPServerResource}
 )
 
 // Manager provides operations for MCPAccessGrant and MCPAgentSession resources.
@@ -36,6 +45,51 @@ func NewManager(dynamic dynamic.Interface, clientset kubernetes.Interface) *Mana
 		dynamic:   dynamic,
 		clientset: clientset,
 	}
+}
+
+// ResolveServerRefNamespace returns the namespace to resolve serverRef against.
+// Empty or whitespace ref.Namespace defaults to DefaultMCPResourceNamespace.
+func ResolveServerRefNamespace(ref ServerReference) string {
+	if ns := strings.TrimSpace(ref.Namespace); ns != "" {
+		return ns
+	}
+	return DefaultMCPResourceNamespace
+}
+
+// ErrMCPServerNotFound is returned by AssertMCPServerRef when the target MCPServer is missing.
+type ErrMCPServerNotFound struct {
+	Name, Namespace string
+}
+
+func (e *ErrMCPServerNotFound) Error() string {
+	if e == nil {
+		return ""
+	}
+	return fmt.Sprintf("unknown serverRef: MCPServer %q not found in namespace %q", e.Name, e.Namespace)
+}
+
+// IsMCPServerNotFoundForRef returns true if err is an *ErrMCPServerNotFound.
+func IsMCPServerNotFoundForRef(err error) bool {
+	var missing *ErrMCPServerNotFound
+	return err != nil && errors.As(err, &missing)
+}
+
+// AssertMCPServerRef returns an error if no MCPServer exists at the given ref.
+// Use this before creating grants or sessions so the API can reject unknown targets early.
+func (m *Manager) AssertMCPServerRef(ctx context.Context, ref ServerReference) error {
+	name := strings.TrimSpace(ref.Name)
+	if name == "" {
+		return fmt.Errorf("serverRef.name is required")
+	}
+	ns := ResolveServerRefNamespace(ref)
+	_, err := m.dynamic.Resource(serverGVR).Namespace(ns).Get(ctx, name, metav1.GetOptions{})
+	if err != nil {
+		if apierrors.IsNotFound(err) {
+			return &ErrMCPServerNotFound{Name: name, Namespace: ns}
+		}
+		return fmt.Errorf("lookup serverRef: %w", err)
+	}
+	return nil
 }
 
 // ListGrants returns all MCPAccessGrant resources, optionally filtered by namespace.
@@ -73,6 +127,19 @@ func (m *Manager) GetGrant(ctx context.Context, name, namespace string) (*MCPAcc
 		return nil, fmt.Errorf("failed to get grant %s/%s: %w", namespace, name, err)
 	}
 	return convertToGrant(obj)
+}
+
+// ApplyGrant creates or updates an MCPAccessGrant resource.
+func (m *Manager) ApplyGrant(ctx context.Context, grant *MCPAccessGrant) (*MCPAccessGrant, error) {
+	obj, err := toUnstructured(grant, "MCPAccessGrant")
+	if err != nil {
+		return nil, fmt.Errorf("failed to convert grant %s/%s: %w", grant.Namespace, grant.Name, err)
+	}
+	created, err := m.applyUnstructured(ctx, grantGVR, obj)
+	if err != nil {
+		return nil, fmt.Errorf("failed to apply grant %s/%s: %w", grant.Namespace, grant.Name, err)
+	}
+	return convertToGrant(created)
 }
 
 // DisableGrant disables an MCPAccessGrant by setting spec.disabled to true.
@@ -145,6 +212,19 @@ func (m *Manager) GetSession(ctx context.Context, name, namespace string) (*MCPA
 	return convertToSession(obj)
 }
 
+// ApplySession creates or updates an MCPAgentSession resource.
+func (m *Manager) ApplySession(ctx context.Context, session *MCPAgentSession) (*MCPAgentSession, error) {
+	obj, err := toUnstructured(session, "MCPAgentSession")
+	if err != nil {
+		return nil, fmt.Errorf("failed to convert session %s/%s: %w", session.Namespace, session.Name, err)
+	}
+	created, err := m.applyUnstructured(ctx, sessionGVR, obj)
+	if err != nil {
+		return nil, fmt.Errorf("failed to apply session %s/%s: %w", session.Namespace, session.Name, err)
+	}
+	return convertToSession(created)
+}
+
 // RevokeSession revokes an MCPAgentSession by setting spec.revoked to true.
 func (m *Manager) RevokeSession(ctx context.Context, name, namespace string) error {
 	patch := map[string]interface{}{
@@ -176,6 +256,139 @@ func (m *Manager) patchSession(ctx context.Context, name, namespace string, patc
 		return fmt.Errorf("failed to patch session %s/%s: %w", namespace, name, err)
 	}
 	return nil
+}
+
+// maxApplyConflictRetries bounds the Get→Update retry loop in applyUnstructured.
+// Concurrent toggle endpoints (enable/disable, revoke/unrevoke) and the operator
+// status writer can bump the resourceVersion between our Get and Update; retrying
+// with a fresh read converges quickly without the client having to refresh.
+const maxApplyConflictRetries = 3
+
+// applyUnstructured creates the object or, if it already exists, updates it while
+// preserving server-side metadata the API does not set (finalizers, ownerReferences,
+// and merged label/annotation maps) so operator-injected state is not dropped.
+// Retries on 409 conflicts so concurrent toggles do not surface as a write failure.
+func (m *Manager) applyUnstructured(ctx context.Context, gvr schema.GroupVersionResource, obj *unstructured.Unstructured) (*unstructured.Unstructured, error) {
+	resource := m.dynamic.Resource(gvr).Namespace(obj.GetNamespace())
+	desiredLabels := obj.GetLabels()
+	desiredAnnotations := obj.GetAnnotations()
+	desiredFinalizers := obj.GetFinalizers()
+	desiredOwnerRefs := obj.GetOwnerReferences()
+
+	var lastErr error
+	for attempt := 0; attempt < maxApplyConflictRetries; attempt++ {
+		existing, err := resource.Get(ctx, obj.GetName(), metav1.GetOptions{})
+		if apierrors.IsNotFound(err) {
+			return resource.Create(ctx, obj, metav1.CreateOptions{})
+		}
+		if err != nil {
+			return nil, err
+		}
+		// Reset the desired metadata each attempt; preserveExistingObjectMeta merges
+		// against the latest server state, not whatever a previous attempt produced.
+		obj.SetLabels(desiredLabels)
+		obj.SetAnnotations(desiredAnnotations)
+		obj.SetFinalizers(desiredFinalizers)
+		obj.SetOwnerReferences(desiredOwnerRefs)
+		obj.SetResourceVersion(existing.GetResourceVersion())
+		preserveExistingObjectMeta(existing, obj)
+		updated, err := resource.Update(ctx, obj, metav1.UpdateOptions{})
+		if err == nil {
+			return updated, nil
+		}
+		if !apierrors.IsConflict(err) {
+			return nil, err
+		}
+		lastErr = err
+	}
+	return nil, lastErr
+}
+
+func preserveExistingObjectMeta(existing, obj *unstructured.Unstructured) {
+	obj.SetLabels(mergeStringMap(existing.GetLabels(), obj.GetLabels()))
+	obj.SetAnnotations(mergeStringMap(existing.GetAnnotations(), obj.GetAnnotations()))
+	obj.SetFinalizers(mergeStringSlice(existing.GetFinalizers(), obj.GetFinalizers()))
+	obj.SetOwnerReferences(mergeOwnerReferences(existing.GetOwnerReferences(), obj.GetOwnerReferences()))
+}
+
+func mergeStringMap(existing, desired map[string]string) map[string]string {
+	if len(existing) == 0 && len(desired) == 0 {
+		return nil
+	}
+	merged := make(map[string]string, len(existing)+len(desired))
+	for key, value := range existing {
+		merged[key] = value
+	}
+	for key, value := range desired {
+		merged[key] = value
+	}
+	return merged
+}
+
+func mergeStringSlice(existing, desired []string) []string {
+	if len(existing) == 0 {
+		return desired
+	}
+	seen := make(map[string]struct{}, len(existing)+len(desired))
+	merged := make([]string, 0, len(existing)+len(desired))
+	for _, value := range existing {
+		if _, ok := seen[value]; ok {
+			continue
+		}
+		seen[value] = struct{}{}
+		merged = append(merged, value)
+	}
+	for _, value := range desired {
+		if _, ok := seen[value]; ok {
+			continue
+		}
+		seen[value] = struct{}{}
+		merged = append(merged, value)
+	}
+	return merged
+}
+
+func mergeOwnerReferences(existing, desired []metav1.OwnerReference) []metav1.OwnerReference {
+	if len(existing) == 0 {
+		return desired
+	}
+	seen := make(map[string]struct{}, len(existing)+len(desired))
+	merged := make([]metav1.OwnerReference, 0, len(existing)+len(desired))
+	for _, owner := range existing {
+		key := ownerReferenceKey(owner)
+		if _, ok := seen[key]; ok {
+			continue
+		}
+		seen[key] = struct{}{}
+		merged = append(merged, owner)
+	}
+	for _, owner := range desired {
+		key := ownerReferenceKey(owner)
+		if _, ok := seen[key]; ok {
+			continue
+		}
+		seen[key] = struct{}{}
+		merged = append(merged, owner)
+	}
+	return merged
+}
+
+func ownerReferenceKey(owner metav1.OwnerReference) string {
+	if owner.UID != "" {
+		return string(owner.UID)
+	}
+	return owner.APIVersion + "/" + owner.Kind + "/" + owner.Name
+}
+
+func toUnstructured(obj interface{}, kind string) (*unstructured.Unstructured, error) {
+	content, err := runtime.DefaultUnstructuredConverter.ToUnstructured(obj)
+	if err != nil {
+		return nil, err
+	}
+	u := &unstructured.Unstructured{Object: content}
+	u.SetAPIVersion(APIGroup + "/" + APIVersion)
+	u.SetKind(kind)
+	return u, nil
 }
 
 // GetServerPolicy returns the rendered policy for a specific server if available.

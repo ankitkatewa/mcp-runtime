@@ -35,12 +35,20 @@ const (
 	sessionCookieName = "mcp_ui_session"
 	sessionDuration   = 8 * time.Hour
 
-	loginRateLimitCapacity = 10
-	loginRateLimitRefill   = time.Minute
-	loginFailureWindow     = 15 * time.Minute
-	loginFailureThreshold  = 5
-	loginLockoutDuration   = 5 * time.Minute
-	loginFailureLogEvery   = 3
+	defaultLoginRateLimitCapacity = 10
+	defaultLoginRateLimitRefill   = time.Minute
+	defaultLoginFailureWindow     = 15 * time.Minute
+	defaultLoginFailureThreshold  = 5
+	defaultLoginLockoutDuration   = 5 * time.Minute
+	loginFailureLogEvery          = 3
+)
+
+var (
+	loginRateLimitCapacity = intEnvOr("UI_LOGIN_RATE_CAPACITY", defaultLoginRateLimitCapacity)
+	loginRateLimitRefill   = durationEnvOr("UI_LOGIN_RATE_REFILL", defaultLoginRateLimitRefill)
+	loginFailureWindow     = durationEnvOr("UI_LOGIN_FAILURE_WINDOW", defaultLoginFailureWindow)
+	loginFailureThreshold  = intEnvOr("UI_LOGIN_FAILURE_THRESHOLD", defaultLoginFailureThreshold)
+	loginLockoutDuration   = durationEnvOr("UI_LOGIN_LOCKOUT", defaultLoginLockoutDuration)
 )
 
 type sessionPayload struct {
@@ -129,11 +137,24 @@ func newMux(apiBase, apiUpstream, apiKey, apiKeys string) (*http.ServeMux, error
 		w.WriteHeader(http.StatusOK)
 		_, _ = w.Write([]byte(`{"ok":true}`))
 	})
+	defaultNamespace := envOr("UI_DEFAULT_NAMESPACE", "mcp-servers")
+	defaultPolicyVersion := envOr("UI_DEFAULT_POLICY_VERSION", "v1")
+	baseJSON, err := json.Marshal(apiBase)
+	if err != nil {
+		return nil, err
+	}
+	defaultsJSON, err := json.Marshal(map[string]string{
+		"namespace":     defaultNamespace,
+		"policyVersion": defaultPolicyVersion,
+	})
+	if err != nil {
+		return nil, err
+	}
+	configJS := "window.MCP_API_BASE = " + string(baseJSON) + ";\n" +
+		"window.MCP_DEFAULTS = " + string(defaultsJSON) + ";"
 	mux.HandleFunc("/config.js", func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("content-type", "application/javascript")
-		baseJSON, _ := json.Marshal(apiBase)
-		config := "window.MCP_API_BASE = " + string(baseJSON) + ";"
-		_, _ = w.Write([]byte(config))
+		_, _ = w.Write([]byte(configJS))
 	})
 	mux.HandleFunc("/auth/login", handleLogin(apiKey, sessionKey))
 	mux.HandleFunc("/auth/logout", handleLogout)
@@ -226,7 +247,12 @@ func handleLogin(apiKey string, sessionKey []byte) http.HandlerFunc {
 			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid_request"})
 			return
 		}
-		if !hmac.Equal([]byte(strings.TrimSpace(req.APIKey)), []byte(apiKey)) {
+		presented := strings.TrimSpace(req.APIKey)
+		if presented == "" {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "missing_api_key"})
+			return
+		}
+		if !hmac.Equal([]byte(presented), []byte(apiKey)) {
 			failures := loginAttempts.recordFailure(clientID)
 			if failures >= loginFailureLogEvery {
 				log.Printf(`auth_login_failure client=%q timestamp=%q failure_count=%d`, clientID, time.Now().UTC().Format(time.RFC3339), failures)
@@ -235,7 +261,10 @@ func handleLogin(apiKey string, sessionKey []byte) http.HandlerFunc {
 			return
 		}
 
-		loginAttempts.recordSuccess(clientID)
+		priorFailures := loginAttempts.recordSuccess(clientID)
+		if priorFailures > 0 {
+			log.Printf(`auth_login_success_after_failures client=%q timestamp=%q prior_failures=%d`, clientID, time.Now().UTC().Format(time.RFC3339), priorFailures)
+		}
 		http.SetCookie(w, newSessionCookie(r, sessionKey))
 		writeJSON(w, http.StatusOK, map[string]bool{"authenticated": true})
 	}
@@ -292,14 +321,16 @@ func (t *loginAttemptTracker) recordFailure(clientID string) int {
 	return state.failures
 }
 
-func (t *loginAttemptTracker) recordSuccess(clientID string) {
+func (t *loginAttemptTracker) recordSuccess(clientID string) int {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 
 	state := t.stateForLocked(clientID)
+	prior := state.failures
 	state.failures = 0
 	state.failuresExpire = time.Time{}
 	state.lockedUntil = time.Time{}
+	return prior
 }
 
 func (t *loginAttemptTracker) stateForLocked(clientID string) *loginClientState {
@@ -466,7 +497,9 @@ func normalizePathPrefix(value string) string {
 func writeJSON(w http.ResponseWriter, status int, payload any) {
 	w.Header().Set("content-type", "application/json")
 	w.WriteHeader(status)
-	_ = json.NewEncoder(w).Encode(payload)
+	if err := json.NewEncoder(w).Encode(payload); err != nil {
+		log.Printf("writeJSON encode error (status=%d): %v", status, err)
+	}
 }
 
 // logRequests is middleware that logs HTTP requests.
@@ -532,6 +565,32 @@ func envOr(key, fallback string) string {
 		return val
 	}
 	return fallback
+}
+
+func intEnvOr(key string, fallback int) int {
+	val := strings.TrimSpace(os.Getenv(key))
+	if val == "" {
+		return fallback
+	}
+	parsed, err := strconv.Atoi(val)
+	if err != nil || parsed <= 0 {
+		log.Printf("invalid %s=%q; using default %d", key, val, fallback)
+		return fallback
+	}
+	return parsed
+}
+
+func durationEnvOr(key string, fallback time.Duration) time.Duration {
+	val := strings.TrimSpace(os.Getenv(key))
+	if val == "" {
+		return fallback
+	}
+	parsed, err := time.ParseDuration(val)
+	if err != nil || parsed <= 0 {
+		log.Printf("invalid %s=%q; using default %s", key, val, fallback)
+		return fallback
+	}
+	return parsed
 }
 
 // otlpTraceOptions configures OTLP HTTP exporter options.
