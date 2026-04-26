@@ -45,6 +45,12 @@ func acmeServerURL(staging bool) string {
 	return letsencryptProdURL
 }
 
+// acmeTLSDNSNames returns the SANs for the unified registry Certificate in the
+// registry namespace. The platform UI hostname is intentionally NOT included:
+// the platform Ingress in the mcp-sentinel namespace owns its own cert via
+// cert-manager's ingress-shim because Kubernetes Ingress resources cannot
+// reference TLS Secrets across namespaces. Adding the platform host here would
+// cause a redundant ACME order for the same name on every renewal.
 func acmeTLSDNSNames() []string {
 	seen := make(map[string]struct{})
 	var out []string
@@ -65,7 +71,7 @@ func acmeTLSDNSNames() []string {
 func validateACMEHostnameForPublicCA() error {
 	names := acmeTLSDNSNames()
 	if len(names) == 0 {
-		return fmt.Errorf("ACME public CA requires a public DNS name; set MCP_PLATFORM_DOMAIN, MCP_REGISTRY_HOST, or MCP_REGISTRY_INGRESS_HOST")
+		return fmt.Errorf("ACME public CA requires a public DNS name; set MCP_PLATFORM_DOMAIN, MCP_REGISTRY_HOST, MCP_REGISTRY_INGRESS_HOST, or MCP_MCP_INGRESS_HOST")
 	}
 	for _, host := range names {
 		if isDevRegistryURL(host) {

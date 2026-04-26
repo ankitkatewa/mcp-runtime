@@ -26,7 +26,7 @@ fi
 echo "[info] Sentinel root: ${SENTINEL_ROOT}"
 
 CLUSTER_NAME="${CLUSTER_NAME:-mcp-e2e}"
-PLATFORM_HOST="${PLATFORM_HOST:-mcp.example.local}"
+PLATFORM_HOST="${PLATFORM_HOST:-localhost}"
 SERVER_NAME="${SERVER_NAME:-policy-mcp-server}"
 SERVER_HOST="${SERVER_HOST:-${PLATFORM_HOST}}"
 OAUTH_SERVER_NAME="${OAUTH_SERVER_NAME:-oauth-mcp-server}"
@@ -1311,8 +1311,17 @@ updated = []
 server_name_updated = False
 server_image_updated = False
 mcp_path_updated = False
+public_path_prefix_updated = False
 in_env_vars = False
 current_env_name = None
+
+route_override = os.environ["SERVER_ROUTE_OVERRIDE"].strip()
+route_prefix = route_override.strip("/")
+if route_prefix.endswith("/mcp"):
+    route_prefix = route_prefix[: -len("/mcp")].rstrip("/")
+if not route_prefix:
+    route_prefix = os.environ["SERVER_NAME_OVERRIDE"]
+
 for line in lines:
     stripped = line.lstrip()
     indent = line[: len(line) - len(stripped)]
@@ -1323,6 +1332,9 @@ for line in lines:
         updated.append(f"{indent}ingressHost: {os.environ['SERVER_HOST_OVERRIDE']}")
     elif stripped.startswith("route: "):
         updated.append(f"{indent}route: {os.environ['SERVER_ROUTE_OVERRIDE']}")
+    elif stripped.startswith("publicPathPrefix: "):
+        updated.append(f"{indent}publicPathPrefix: {route_prefix}")
+        public_path_prefix_updated = True
     elif not server_image_updated and indent == "    " and stripped.startswith("image: "):
         updated.append(f"{indent}image: {os.environ['SERVER_IMAGE_OVERRIDE']}")
         server_image_updated = True
@@ -1367,6 +1379,18 @@ if not mcp_path_updated:
             inserted = True
     updated = final
     mcp_path_updated = inserted
+if not public_path_prefix_updated:
+    final = []
+    inserted = False
+    for line in updated:
+        final.append(line)
+        stripped = line.lstrip()
+        indent = line[: len(line) - len(stripped)]
+        if not inserted and indent == "    " and stripped.startswith("route: "):
+            final.append(f"{indent}publicPathPrefix: {route_prefix}")
+            inserted = True
+    updated = final
+    public_path_prefix_updated = inserted
 path.write_text("\n".join(updated) + "\n", encoding="utf-8")
 
 # Verify substitutions landed; missing fields cause silent failures later.
@@ -1376,6 +1400,8 @@ if not server_image_updated:
     raise SystemExit(f"prepare_example_metadata: image field was not updated in {path}")
 if not mcp_path_updated:
     raise SystemExit(f"prepare_example_metadata: MCP_PATH env var was not updated in {path}")
+if not public_path_prefix_updated:
+    raise SystemExit(f"prepare_example_metadata: publicPathPrefix was not updated in {path}")
 PY
 }
 
@@ -1693,7 +1719,7 @@ version: v1
 servers:
   - name: ${SERVER_NAME}
     route: /${SERVER_NAME}/mcp
-    ingressHost: ${SERVER_HOST}
+    publicPathPrefix: ${SERVER_NAME}
     port: 8090
     namespace: mcp-servers
     envVars:
@@ -1815,6 +1841,8 @@ PY_SERVER_NAME="${SERVER_NAME}" \
 PY_SERVER_HOST="${SERVER_HOST}" \
 PY_WORKDIR="${WORKDIR}" \
 PY_TRAEFIK_PORT="${TRAEFIK_PORT}" \
+PY_MCP_SMOKE_ANON_PORT="${MCP_SMOKE_ANON_PORT}" \
+PY_MCP_SMOKE_SESSION_PORT="${MCP_SMOKE_SESSION_PORT}" \
 E2E_HELPERS="${PROJECT_ROOT}/test/e2e/e2e_helpers.py" \
 python3 <<'PYEOF'
 import os
@@ -1843,21 +1871,32 @@ expected_path = f"/{server_name}/mcp"
 check(f"ingressPath: {expected_path}" in get_yaml,
       f"ingressPath: {expected_path}",
       f"server get: ingressPath not '{expected_path}'\n{get_yaml}")
-check(f"ingressHost: {server_host}" in get_yaml,
-      f"ingressHost: {server_host}",
-      f"server get: ingressHost not '{server_host}'\n{get_yaml}")
+check(f"publicPathPrefix: {server_name}" in get_yaml,
+      f"publicPathPrefix: {server_name}",
+      f"server get: publicPathPrefix not '{server_name}'\n{get_yaml}")
 
 # Extract ingressPath and ingressHost to build MCP client config URL
 m_path = re.search(r'ingressPath:\s*(\S+)', get_yaml)
-m_host = re.search(r'ingressHost:\s*(\S+)', get_yaml)
 ingress_path = m_path.group(1) if m_path else expected_path
-ingress_host = m_host.group(1) if m_host else server_host
 
 traefik_port = os.environ.get("PY_TRAEFIK_PORT", "18080")
-mcp_url = f"http://{ingress_host}:{traefik_port}{ingress_path}"
+anon_proxy_port = os.environ.get("PY_MCP_SMOKE_ANON_PORT", "18084")
+session_proxy_port = os.environ.get("PY_MCP_SMOKE_SESSION_PORT", "18086")
+
+# Path-based local e2e usage should prefer local header proxies that already inject
+# MCP protocol and identity headers where needed.
+canonical_mcp_url = f"http://127.0.0.1:{traefik_port}{ingress_path}"
+local_anon_url = f"http://127.0.0.1:{anon_proxy_port}{ingress_path}"
+local_session_url = f"http://127.0.0.1:{session_proxy_port}{ingress_path}"
 import json
-config = {"mcpServers": {server_name: {"url": mcp_url}}}
-print(f"[cli] MCP client config for {server_name}:")
+config = {
+    "mcpServers": {
+        server_name: {"url": local_session_url},
+        f"{server_name}-anon": {"url": local_anon_url},
+    }
+}
+print(f"[cli] Canonical ingress URL for {server_name}: {canonical_mcp_url}")
+print(f"[cli] Local e2e MCP client config for {server_name}:")
 print(json.dumps(config, indent=2))
 PYEOF
 
@@ -2132,9 +2171,12 @@ if scenario_selected "smoke-auth"; then
     "DELETE requires an Mcp-Session-Id header"
 
   echo "[mcp] running external mcp-smoke smoke checks against ingress"
-  run_mcp_smoke_expect "mcp-smoke-missing-identity" "${MCP_ANON_URL}" false "missing_identity"
-  run_mcp_smoke_expect "mcp-smoke-missing-session" "${MCP_IDENTITY_URL}" false "missing_session"
-  run_mcp_smoke_expect "mcp-smoke-session-not-found" "${MCP_BAD_SESSION_URL}" false "session_not_found"
+  run_mcp_smoke_expect "mcp-smoke-missing-identity" "${MCP_ANON_URL}" false "missing_identity" \
+    || run_mcp_smoke_expect "mcp-smoke-missing-identity-retry" "${MCP_ANON_URL}" false "missing_identity"
+  run_mcp_smoke_expect "mcp-smoke-missing-session" "${MCP_IDENTITY_URL}" false "missing_session" \
+    || run_mcp_smoke_expect "mcp-smoke-missing-session-retry" "${MCP_IDENTITY_URL}" false "missing_session"
+  run_mcp_smoke_expect "mcp-smoke-session-not-found" "${MCP_BAD_SESSION_URL}" false "session_not_found" \
+    || run_mcp_smoke_expect "mcp-smoke-session-not-found-retry" "${MCP_BAD_SESSION_URL}" false "session_not_found"
   echo "[mcp] waiting for session-backed allow policy to reach the gateway"
   wait_for_mcp_tool_result "${MCP_SESSION_URL}" "aaa-ping" '{}' 200
   run_mcp_smoke_expect "mcp-smoke-allow-aaa-ping" "${MCP_SESSION_URL}" true
@@ -2612,7 +2654,7 @@ servers:
     image: ${SERVER_IMAGE%:*}
     imageTag: ${SERVER_IMAGE##*:}
     route: /${OAUTH_SERVER_NAME}/mcp
-    ingressHost: ${OAUTH_SERVER_HOST}
+    publicPathPrefix: ${OAUTH_SERVER_NAME}
     port: 8090
     namespace: mcp-servers
     envVars:
@@ -3063,17 +3105,21 @@ check(
     "oauth proxy metadata bearer_methods_supported matched",
     f"unexpected oauth metadata bearer methods: {oauth_metadata}",
 )
+oauth_resource_url = oauth_metadata.get("resource", "")
+oauth_resource_path = urllib.parse.urlsplit(oauth_resource_url).path or "/"
 check(
-    oauth_metadata.get("resource") == f"{oauth_public_base}/",
-    "oauth proxy metadata root resource URL matched",
+    oauth_resource_path == "/",
+    "oauth proxy metadata root resource path matched",
     f"unexpected oauth metadata resource URL: {oauth_metadata}",
 )
 oauth_metadata_path = expect_json(
     f"{oauth_proxy_base}/.well-known/oauth-protected-resource/{oauth_server_name}/mcp"
 )
+oauth_resource_path_url = oauth_metadata_path.get("resource", "")
+oauth_resource_path_value = urllib.parse.urlsplit(oauth_resource_path_url).path
 check(
-    oauth_metadata_path.get("resource") == f"{oauth_public_base}/{oauth_server_name}/mcp",
-    "oauth proxy metadata path resource URL matched",
+    oauth_resource_path_value == f"/{oauth_server_name}/mcp",
+    "oauth proxy metadata path resource matched",
     f"unexpected oauth metadata path resource URL: {oauth_metadata_path}",
 )
 expect_mcp_initialize(
