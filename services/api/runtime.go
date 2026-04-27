@@ -7,18 +7,29 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"os"
 	"strings"
 	"time"
 
 	"github.com/ClickHouse/clickhouse-go/v2"
+	appsv1 "k8s.io/api/apps/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	apiruntime "k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/runtime/schema"
+	mcpv1alpha1 "mcp-runtime/api/v1alpha1"
 	sentinelaccess "mcp-runtime/pkg/access"
 	chpkg "mcp-runtime/pkg/clickhouse"
 	"mcp-runtime/pkg/k8sclient"
 	"mcp-runtime/pkg/sentinel"
 	"mcp-runtime/pkg/serviceutil"
 )
+
+var mcpServerGVR = schema.GroupVersionResource{
+	Group:    sentinelaccess.APIGroup,
+	Version:  sentinelaccess.APIVersion,
+	Resource: sentinelaccess.MCPServerResource,
+}
 
 type accessGrantRequest struct {
 	Name          string                         `json:"name"`
@@ -139,13 +150,52 @@ func (s *RuntimeServer) handleRuntimeServers(w http.ResponseWriter, r *http.Requ
 	defer cancel()
 
 	namespace := strings.TrimSpace(r.URL.Query().Get("namespace"))
+	if p, ok := principalFromContext(r.Context()); ok && p.Role != roleAdmin {
+		switch {
+		case namespace == "":
+			// Non-admin users should still see the shared MCP catalog by default.
+			namespace = "mcp-servers"
+		case namespace == "mcp-servers":
+			// Allow explicit shared catalog lookup.
+		case p.Namespace != "" && namespace == p.Namespace:
+			// Allow user's private namespace lookup.
+		default:
+			writeJSON(w, http.StatusForbidden, map[string]string{"error": "forbidden namespace"})
+			return
+		}
+	}
 	if namespace == "" {
 		namespace = "mcp-servers"
 	}
 
-	// MCPServer deployments are reconciled by the runtime operator into the mcp-servers
-	// namespace and labeled as managed-by=mcp-runtime with a stable/canary rollout track.
-	// The UI needs the stable server set, not every deployment in the cluster.
+	serverObjects, err := s.k8sClients.Dynamic.Resource(mcpServerGVR).Namespace(namespace).List(ctx, metav1.ListOptions{})
+	if err == nil {
+		deployments, deployErr := s.k8sClients.Clientset.AppsV1().Deployments(namespace).List(ctx, metav1.ListOptions{
+			LabelSelector: "app.kubernetes.io/managed-by=mcp-runtime,mcpruntime.org/rollout-track=stable",
+		})
+		deploymentStatus := map[string]serverDeploymentStatus{}
+		if deployErr == nil {
+			for _, d := range deployments.Items {
+				deploymentStatus[d.Name] = statusForDeployment(d)
+			}
+		}
+		servers := make([]serverInfo, 0, len(serverObjects.Items))
+		for _, obj := range serverObjects.Items {
+			var mcpServer mcpv1alpha1.MCPServer
+			if convertErr := apiruntime.DefaultUnstructuredConverter.FromUnstructured(obj.Object, &mcpServer); convertErr != nil {
+				log.Printf("runtime servers: convert MCPServer %s/%s: %v", obj.GetNamespace(), obj.GetName(), convertErr)
+				continue
+			}
+			servers = append(servers, serverInfoFromMCPServer(mcpServer, deploymentStatus[mcpServer.Name]))
+		}
+		writeJSON(w, http.StatusOK, map[string]interface{}{"servers": servers})
+		return
+	}
+	if !apierrors.IsNotFound(err) {
+		log.Printf("runtime servers: list MCPServers failed: %v", err)
+	}
+
+	// Fall back to stable deployments for older clusters where the MCPServer CRD is not available.
 	deployments, err := s.k8sClients.Clientset.AppsV1().Deployments(namespace).List(ctx, metav1.ListOptions{
 		LabelSelector: "app.kubernetes.io/managed-by=mcp-runtime,mcpruntime.org/rollout-track=stable",
 	})
@@ -154,39 +204,129 @@ func (s *RuntimeServer) handleRuntimeServers(w http.ResponseWriter, r *http.Requ
 		return
 	}
 
-	type ServerInfo struct {
-		Name      string            `json:"name"`
-		Namespace string            `json:"namespace"`
-		Ready     string            `json:"ready"`
-		Status    string            `json:"status"`
-		Labels    map[string]string `json:"labels"`
-		Age       string            `json:"age"`
-	}
-
-	servers := make([]ServerInfo, 0, len(deployments.Items))
+	servers := make([]serverInfo, 0, len(deployments.Items))
 	for _, d := range deployments.Items {
-		ready := "0/0"
-		status := "NotReady"
-		if d.Spec.Replicas != nil {
-			ready = fmt.Sprintf("%d/%d", d.Status.ReadyReplicas, *d.Spec.Replicas)
-			if d.Status.ReadyReplicas == *d.Spec.Replicas && *d.Spec.Replicas > 0 {
-				status = "Ready"
-			} else if d.Status.ReadyReplicas > 0 {
-				status = "Degraded"
-			}
-		}
-
-		servers = append(servers, ServerInfo{
+		deploymentStatus := statusForDeployment(d)
+		servers = append(servers, serverInfo{
 			Name:      d.Name,
 			Namespace: d.Namespace,
-			Ready:     ready,
-			Status:    status,
+			Ready:     deploymentStatus.Ready,
+			Status:    deploymentStatus.Status,
 			Labels:    d.Labels,
 			Age:       d.CreationTimestamp.Format("2006-01-02T15:04:05Z"),
+			Prompts:   []mcpv1alpha1.InventoryItem{},
+			Resources: []mcpv1alpha1.InventoryItem{},
+			Tasks:     []mcpv1alpha1.InventoryItem{},
 		})
 	}
 
 	writeJSON(w, http.StatusOK, map[string]interface{}{"servers": servers})
+}
+
+type serverInfo struct {
+	Name       string                      `json:"name"`
+	Namespace  string                      `json:"namespace"`
+	Ready      string                      `json:"ready"`
+	Status     string                      `json:"status"`
+	Labels     map[string]string           `json:"labels,omitempty"`
+	Age        string                      `json:"age"`
+	Endpoint   string                      `json:"endpoint,omitempty"`
+	Tools      []mcpv1alpha1.ToolConfig    `json:"tools,omitempty"`
+	Prompts    []mcpv1alpha1.InventoryItem `json:"prompts"`
+	Resources  []mcpv1alpha1.InventoryItem `json:"resources"`
+	Tasks      []mcpv1alpha1.InventoryItem `json:"tasks"`
+	AccessJSON map[string]any              `json:"access_json,omitempty"`
+}
+
+type serverDeploymentStatus struct {
+	Ready  string
+	Status string
+}
+
+func statusForDeployment(d appsv1.Deployment) serverDeploymentStatus {
+	ready := "0/0"
+	status := "NotReady"
+	if d.Spec.Replicas != nil {
+		ready = fmt.Sprintf("%d/%d", d.Status.ReadyReplicas, *d.Spec.Replicas)
+		if d.Status.ReadyReplicas == *d.Spec.Replicas && *d.Spec.Replicas > 0 {
+			status = "Ready"
+		} else if d.Status.ReadyReplicas > 0 {
+			status = "Degraded"
+		}
+	}
+	return serverDeploymentStatus{Ready: ready, Status: status}
+}
+
+func serverInfoFromMCPServer(mcpServer mcpv1alpha1.MCPServer, deploymentStatus serverDeploymentStatus) serverInfo {
+	if deploymentStatus.Ready == "" {
+		deploymentStatus = serverDeploymentStatus{Ready: "0/0", Status: strings.TrimSpace(mcpServer.Status.Phase)}
+		if deploymentStatus.Status == "" {
+			deploymentStatus.Status = "Unknown"
+		}
+	}
+	endpoint := publicMCPEndpoint(mcpServer)
+	info := serverInfo{
+		Name:      mcpServer.Name,
+		Namespace: mcpServer.Namespace,
+		Ready:     deploymentStatus.Ready,
+		Status:    deploymentStatus.Status,
+		Labels:    mcpServer.Labels,
+		Age:       mcpServer.CreationTimestamp.Format("2006-01-02T15:04:05Z"),
+		Endpoint:  endpoint,
+		Tools:     mcpServer.Spec.Tools,
+		Prompts:   inventoryItemsOrEmpty(mcpServer.Spec.Prompts),
+		Resources: inventoryItemsOrEmpty(mcpServer.Spec.MCPResources),
+		Tasks:     inventoryItemsOrEmpty(mcpServer.Spec.Tasks),
+	}
+	if endpoint != "" {
+		info.AccessJSON = map[string]any{
+			"mcpServers": map[string]any{
+				mcpServer.Name: map[string]any{
+					"type": "http",
+					"url":  endpoint,
+				},
+			},
+		}
+	}
+	return info
+}
+
+func inventoryItemsOrEmpty(items []mcpv1alpha1.InventoryItem) []mcpv1alpha1.InventoryItem {
+	if len(items) == 0 {
+		return []mcpv1alpha1.InventoryItem{}
+	}
+	return items
+}
+
+func publicMCPEndpoint(mcpServer mcpv1alpha1.MCPServer) string {
+	path := strings.TrimSpace(mcpServer.Spec.IngressPath)
+	if path == "" {
+		prefix := strings.Trim(strings.TrimSpace(mcpServer.Spec.PublicPathPrefix), "/")
+		if prefix == "" {
+			prefix = mcpServer.Name
+		}
+		path = "/" + prefix + "/mcp"
+	}
+	if !strings.HasPrefix(path, "/") {
+		path = "/" + path
+	}
+	host := strings.TrimSpace(mcpServer.Spec.IngressHost)
+	if host == "" {
+		host = strings.TrimSpace(os.Getenv("MCP_MCP_INGRESS_HOST"))
+	}
+	if host == "" {
+		if domain := strings.TrimSpace(os.Getenv("MCP_PLATFORM_DOMAIN")); domain != "" {
+			host = "mcp." + strings.Trim(strings.TrimPrefix(strings.TrimPrefix(domain, "https://"), "http://"), "/")
+		}
+	}
+	if host == "" {
+		return path
+	}
+	scheme := "https"
+	if strings.HasPrefix(host, "localhost") || strings.HasPrefix(host, "127.0.0.1") {
+		scheme = "http"
+	}
+	return scheme + "://" + strings.TrimRight(host, "/") + path
 }
 
 // handleRuntimeGrants returns MCPAccessGrant resources.
@@ -211,7 +351,11 @@ func (s *RuntimeServer) handleRuntimeGrantList(w http.ResponseWriter, r *http.Re
 	ctx, cancel := context.WithTimeout(r.Context(), 10*time.Second)
 	defer cancel()
 
-	namespace := r.URL.Query().Get("namespace")
+	namespace, err := s.scopedNamespaceForPrincipal(r.Context(), r.URL.Query().Get("namespace"))
+	if err != nil {
+		writeJSON(w, http.StatusForbidden, map[string]string{"error": err.Error()})
+		return
+	}
 	grants, err := s.accessMgr.ListGrants(ctx, namespace)
 	if err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "failed to list grants"})
@@ -238,10 +382,19 @@ func (s *RuntimeServer) handleRuntimeGrantApply(w http.ResponseWriter, r *http.R
 		writeBodyDecodeError(w, err)
 		return
 	}
+	if p, ok := principalFromContext(r.Context()); ok && p.Role != roleAdmin && strings.TrimSpace(req.Namespace) == "" {
+		req.Namespace = strings.TrimSpace(p.Namespace)
+	}
 	if err := validateGrantRequest(&req); err != nil {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
 		return
 	}
+	scopedNamespace, err := s.scopedNamespaceForPrincipal(r.Context(), req.Namespace)
+	if err != nil {
+		writeJSON(w, http.StatusForbidden, map[string]string{"error": err.Error()})
+		return
+	}
+	req.Namespace = scopedNamespace
 
 	ctx, cancel := context.WithTimeout(r.Context(), 10*time.Second)
 	defer cancel()
@@ -309,7 +462,11 @@ func (s *RuntimeServer) handleRuntimeSessionList(w http.ResponseWriter, r *http.
 	ctx, cancel := context.WithTimeout(r.Context(), 10*time.Second)
 	defer cancel()
 
-	namespace := r.URL.Query().Get("namespace")
+	namespace, err := s.scopedNamespaceForPrincipal(r.Context(), r.URL.Query().Get("namespace"))
+	if err != nil {
+		writeJSON(w, http.StatusForbidden, map[string]string{"error": err.Error()})
+		return
+	}
 	sessions, err := s.accessMgr.ListSessions(ctx, namespace)
 	if err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "failed to list sessions"})
@@ -336,10 +493,19 @@ func (s *RuntimeServer) handleRuntimeSessionApply(w http.ResponseWriter, r *http
 		writeBodyDecodeError(w, err)
 		return
 	}
+	if p, ok := principalFromContext(r.Context()); ok && p.Role != roleAdmin && strings.TrimSpace(req.Namespace) == "" {
+		req.Namespace = strings.TrimSpace(p.Namespace)
+	}
 	if err := validateSessionRequest(&req); err != nil {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
 		return
 	}
+	scopedNamespace, err := s.scopedNamespaceForPrincipal(r.Context(), req.Namespace)
+	if err != nil {
+		writeJSON(w, http.StatusForbidden, map[string]string{"error": err.Error()})
+		return
+	}
+	req.Namespace = scopedNamespace
 
 	ctx, cancel := context.WithTimeout(r.Context(), 10*time.Second)
 	defer cancel()
@@ -442,15 +608,19 @@ func (s *RuntimeServer) handleRuntimePolicy(w http.ResponseWriter, r *http.Reque
 	ctx, cancel := context.WithTimeout(r.Context(), 10*time.Second)
 	defer cancel()
 
-	namespace := r.URL.Query().Get("namespace")
+	namespace, err := s.scopedNamespaceForPrincipal(r.Context(), r.URL.Query().Get("namespace"))
+	if err != nil {
+		writeJSON(w, http.StatusForbidden, map[string]string{"error": err.Error()})
+		return
+	}
 	server := r.URL.Query().Get("server")
 
-	if namespace == "" || server == "" {
+	if strings.TrimSpace(namespace) == "" || server == "" {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "namespace and server parameters required"})
 		return
 	}
 
-	policy, err := s.accessMgr.GetServerPolicy(ctx, namespace, server)
+	policy, err := s.accessMgr.GetServerPolicy(ctx, strings.TrimSpace(namespace), server)
 	if err != nil {
 		writeJSON(w, http.StatusNotFound, map[string]string{"error": "policy not found"})
 		return
@@ -459,8 +629,83 @@ func (s *RuntimeServer) handleRuntimePolicy(w http.ResponseWriter, r *http.Reque
 	writeJSON(w, http.StatusOK, policy)
 }
 
-// handleGrantTogglePath handles POST /api/runtime/grants/{namespace}/{name}/disable|enable
-func (s *RuntimeServer) handleGrantTogglePath(w http.ResponseWriter, r *http.Request) {
+// handleGrantItemPath handles POST /api/runtime/grants/{namespace}/{name}/disable|enable
+// and DELETE /api/runtime/grants/{namespace}/{name}.
+func (s *RuntimeServer) handleGrantItemPath(w http.ResponseWriter, r *http.Request) {
+	switch r.Method {
+	case http.MethodGet:
+		ns, name, err := extractNamespacedPath(r.URL.Path, "/api/runtime/grants/", 2)
+		if err != nil {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+			return
+		}
+		s.handleGrantGet(w, r, ns, name)
+		return
+	case http.MethodDelete:
+		ns, name, err := serviceutil.ExtractNamespacedResourceDelete(r, "/api/runtime/grants/")
+		if err != nil {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+			return
+		}
+		s.handleGrantDelete(w, r, ns, name)
+		return
+	case http.MethodPost:
+		s.handleGrantPostTogglePath(w, r)
+		return
+	default:
+		w.Header().Set("allow", "GET, POST, DELETE")
+		writeJSON(w, http.StatusMethodNotAllowed, map[string]string{"error": "method_not_allowed"})
+	}
+}
+
+func (s *RuntimeServer) handleGrantGet(w http.ResponseWriter, r *http.Request, namespace, name string) {
+	if s.accessMgr == nil {
+		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "kubernetes not available"})
+		return
+	}
+	namespace, err := s.scopedNamespaceForPrincipal(r.Context(), namespace)
+	if err != nil {
+		writeJSON(w, http.StatusForbidden, map[string]string{"error": err.Error()})
+		return
+	}
+	ctx, cancel := context.WithTimeout(r.Context(), 10*time.Second)
+	defer cancel()
+	grant, err := s.accessMgr.GetGrant(ctx, name, namespace)
+	if err != nil {
+		code, msg := k8sclient.HTTPStatusFromK8sError(err)
+		writeJSON(w, code, map[string]string{"error": msg})
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"grant": sentinelaccess.ToGrantSummary(*grant)})
+}
+
+func (s *RuntimeServer) handleGrantDelete(w http.ResponseWriter, r *http.Request, namespace, name string) {
+	if s.accessMgr == nil {
+		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "kubernetes not available"})
+		return
+	}
+	namespace, err := s.scopedNamespaceForPrincipal(r.Context(), namespace)
+	if err != nil {
+		writeJSON(w, http.StatusForbidden, map[string]string{"error": err.Error()})
+		return
+	}
+	ctx, cancel := context.WithTimeout(r.Context(), 10*time.Second)
+	defer cancel()
+	if err := s.accessMgr.DeleteGrant(ctx, name, namespace); err != nil {
+		code, msg := k8sclient.HTTPStatusFromK8sError(err)
+		log.Printf("delete grant %s/%s failed (status=%d): %v", namespace, name, code, err)
+		writeJSON(w, code, map[string]string{"error": fmt.Sprintf("failed to delete grant: %s", msg)})
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]interface{}{
+		"success":   true,
+		"name":      name,
+		"namespace": namespace,
+	})
+}
+
+// handleGrantPostTogglePath handles POST /api/runtime/grants/{namespace}/{name}/disable|enable
+func (s *RuntimeServer) handleGrantPostTogglePath(w http.ResponseWriter, r *http.Request) {
 	params, err := serviceutil.ExtractGrantActionParams(r, "/api/runtime/grants/")
 	if err != nil {
 		if errors.Is(err, serviceutil.ErrMethodNotAllowed) {
@@ -478,6 +723,12 @@ func (s *RuntimeServer) handleGrantTogglePath(w http.ResponseWriter, r *http.Req
 func (s *RuntimeServer) handleGrantToggle(w http.ResponseWriter, r *http.Request, namespace, name string, disable bool) {
 	if s.accessMgr == nil {
 		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "kubernetes not available"})
+		return
+	}
+
+	namespace, nsErr := s.scopedNamespaceForPrincipal(r.Context(), namespace)
+	if nsErr != nil {
+		writeJSON(w, http.StatusForbidden, map[string]string{"error": nsErr.Error()})
 		return
 	}
 
@@ -635,8 +886,103 @@ func validDecision(decision sentinelaccess.PolicyDecision) bool {
 	}
 }
 
-// handleSessionTogglePath handles POST /api/runtime/sessions/{namespace}/{name}/revoke|unrevoke
-func (s *RuntimeServer) handleSessionTogglePath(w http.ResponseWriter, r *http.Request) {
+// handleSessionItemPath handles POST /api/runtime/sessions/{namespace}/{name}/revoke|unrevoke
+// and DELETE /api/runtime/sessions/{namespace}/{name}.
+func (s *RuntimeServer) handleSessionItemPath(w http.ResponseWriter, r *http.Request) {
+	switch r.Method {
+	case http.MethodGet:
+		ns, name, err := extractNamespacedPath(r.URL.Path, "/api/runtime/sessions/", 2)
+		if err != nil {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+			return
+		}
+		s.handleSessionGet(w, r, ns, name)
+		return
+	case http.MethodDelete:
+		ns, name, err := serviceutil.ExtractNamespacedResourceDelete(r, "/api/runtime/sessions/")
+		if err != nil {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+			return
+		}
+		s.handleSessionDelete(w, r, ns, name)
+		return
+	case http.MethodPost:
+		s.handleSessionPostTogglePath(w, r)
+		return
+	default:
+		w.Header().Set("allow", "GET, POST, DELETE")
+		writeJSON(w, http.StatusMethodNotAllowed, map[string]string{"error": "method_not_allowed"})
+	}
+}
+
+func (s *RuntimeServer) handleSessionGet(w http.ResponseWriter, r *http.Request, namespace, name string) {
+	if s.accessMgr == nil {
+		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "kubernetes not available"})
+		return
+	}
+	namespace, err := s.scopedNamespaceForPrincipal(r.Context(), namespace)
+	if err != nil {
+		writeJSON(w, http.StatusForbidden, map[string]string{"error": err.Error()})
+		return
+	}
+	ctx, cancel := context.WithTimeout(r.Context(), 10*time.Second)
+	defer cancel()
+	session, err := s.accessMgr.GetSession(ctx, name, namespace)
+	if err != nil {
+		code, msg := k8sclient.HTTPStatusFromK8sError(err)
+		writeJSON(w, code, map[string]string{"error": msg})
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"session": sentinelaccess.ToSessionSummary(*session)})
+}
+
+func extractNamespacedPath(path, prefix string, expectedParts int) (string, string, error) {
+	path = strings.TrimPrefix(path, prefix)
+	parts := strings.Split(strings.Trim(path, "/"), "/")
+	if len(parts) != expectedParts {
+		return "", "", fmt.Errorf("invalid path")
+	}
+	namespace := strings.TrimSpace(parts[0])
+	name := strings.TrimSpace(parts[1])
+	if namespace == "" || name == "" {
+		return "", "", fmt.Errorf("invalid path")
+	}
+	if err := sentinelaccess.ValidateResourceName("namespace", namespace); err != nil {
+		return "", "", err
+	}
+	if err := sentinelaccess.ValidateResourceName("name", name); err != nil {
+		return "", "", err
+	}
+	return namespace, name, nil
+}
+
+func (s *RuntimeServer) handleSessionDelete(w http.ResponseWriter, r *http.Request, namespace, name string) {
+	if s.accessMgr == nil {
+		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "kubernetes not available"})
+		return
+	}
+	namespace, err := s.scopedNamespaceForPrincipal(r.Context(), namespace)
+	if err != nil {
+		writeJSON(w, http.StatusForbidden, map[string]string{"error": err.Error()})
+		return
+	}
+	ctx, cancel := context.WithTimeout(r.Context(), 10*time.Second)
+	defer cancel()
+	if err := s.accessMgr.DeleteSession(ctx, name, namespace); err != nil {
+		code, msg := k8sclient.HTTPStatusFromK8sError(err)
+		log.Printf("delete session %s/%s failed (status=%d): %v", namespace, name, code, err)
+		writeJSON(w, code, map[string]string{"error": fmt.Sprintf("failed to delete session: %s", msg)})
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]interface{}{
+		"success":   true,
+		"name":      name,
+		"namespace": namespace,
+	})
+}
+
+// handleSessionPostTogglePath handles POST /api/runtime/sessions/{namespace}/{name}/revoke|unrevoke
+func (s *RuntimeServer) handleSessionPostTogglePath(w http.ResponseWriter, r *http.Request) {
 	params, err := serviceutil.ExtractSessionActionParams(r, "/api/runtime/sessions/")
 	if err != nil {
 		if errors.Is(err, serviceutil.ErrMethodNotAllowed) {
@@ -654,6 +1000,12 @@ func (s *RuntimeServer) handleSessionTogglePath(w http.ResponseWriter, r *http.R
 func (s *RuntimeServer) handleSessionToggle(w http.ResponseWriter, r *http.Request, namespace, name string, revoke bool) {
 	if s.accessMgr == nil {
 		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "kubernetes not available"})
+		return
+	}
+
+	namespace, nsErr := s.scopedNamespaceForPrincipal(r.Context(), namespace)
+	if nsErr != nil {
+		writeJSON(w, http.StatusForbidden, map[string]string{"error": nsErr.Error()})
 		return
 	}
 
@@ -678,6 +1030,25 @@ func (s *RuntimeServer) handleSessionToggle(w http.ResponseWriter, r *http.Reque
 		"namespace": namespace,
 		"revoked":   revoke,
 	})
+}
+
+func (s *RuntimeServer) scopedNamespaceForPrincipal(ctx context.Context, requested string) (string, error) {
+	requested = strings.TrimSpace(requested)
+	p, ok := principalFromContext(ctx)
+	if !ok || p.Role == roleAdmin {
+		return requested, nil
+	}
+	subjectNamespace := strings.TrimSpace(p.Namespace)
+	if subjectNamespace == "" {
+		return "", errPrincipalIdentityRequired
+	}
+	if requested == "" {
+		return subjectNamespace, nil
+	}
+	if requested != subjectNamespace {
+		return "", errors.New("forbidden namespace")
+	}
+	return requested, nil
 }
 
 // handleActionRestart handles restart requests for components.

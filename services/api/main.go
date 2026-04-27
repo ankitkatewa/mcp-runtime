@@ -27,13 +27,16 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log"
 	"net/http"
 	"os"
+	"os/signal"
 	"regexp"
 	"strconv"
 	"strings"
+	"syscall"
 	"time"
 
 	"github.com/ClickHouse/clickhouse-go/v2"
@@ -69,9 +72,15 @@ type apiServer struct {
 	db           clickhouse.Conn
 	dbName       string
 	apiKeys      map[string]struct{}
+	adminAPIKeys map[string]struct{}
+	adminUsers   map[string]struct{}
 	jwks         *keyfunc.JWKS
 	oidcIssuer   string
 	oidcAudience string
+	userKeys     userAPIKeyStore
+	platform     *platformStore
+	runtime      *RuntimeServer
+	runtimeInit  string
 }
 
 const eventSelectColumns = "timestamp, source, event_type, server, namespace, cluster, human_id, agent_id, session_id, decision, tool_name, payload"
@@ -95,6 +104,15 @@ func main() {
 	metricsPort := envOr("METRICS_PORT", "9090")
 	clickhouseAddr := envOr("CLICKHOUSE_ADDR", "clickhouse:9000")
 	dbName := envOr("CLICKHOUSE_DB", "mcp")
+	if bootstrapOnly, ok := boolEnv("PLATFORM_ADMIN_BOOTSTRAP_ONLY"); ok && bootstrapOnly {
+		ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+		defer cancel()
+		if err := runPlatformAdminBootstrap(ctx); err != nil {
+			log.Fatalf("platform admin bootstrap failed: %v", err)
+		}
+		log.Printf("platform admin bootstrap complete")
+		return
+	}
 	if err := validateDBName(dbName); err != nil {
 		log.Fatalf("invalid CLICKHOUSE_DB: %v", err)
 	}
@@ -106,8 +124,35 @@ func main() {
 			apiKeys[key] = struct{}{}
 		}
 	}
+	adminAPIKeys := splitCSVSet(envOr("ADMIN_API_KEYS", ""))
+	adminUsers := splitCSVSet(envOr("ADMIN_USERS", ""))
+	for entry := range adminUsers {
+		normalized := strings.ToLower(strings.TrimSpace(entry))
+		if normalized != "" {
+			adminUsers[normalized] = struct{}{}
+		}
+	}
+	if len(adminAPIKeys) > 0 {
+		demoted := make([]string, 0, len(apiKeys))
+		for key := range apiKeys {
+			if _, ok := adminAPIKeys[key]; !ok {
+				demoted = append(demoted, maskCredentialForLog(key))
+			}
+		}
+		if len(demoted) > 0 {
+			log.Printf("warning: ADMIN_API_KEYS is set; %d API_KEYS value(s) not listed in ADMIN_API_KEYS will authenticate as role=user (demoted_keys=%v)", len(demoted), demoted)
+		}
+	}
 
+	oidcIssuer := strings.TrimSpace(os.Getenv("OIDC_ISSUER"))
+	oidcAudience := strings.TrimSpace(os.Getenv("OIDC_AUDIENCE"))
 	jwksURL := strings.TrimSpace(os.Getenv("OIDC_JWKS_URL"))
+	if (oidcIssuer != "" || oidcAudience != "") && jwksURL == "" {
+		log.Fatal("OIDC_JWKS_URL is required when OIDC_ISSUER or OIDC_AUDIENCE is configured")
+	}
+	if jwksURL != "" && (oidcIssuer == "" || oidcAudience == "") {
+		log.Fatal("OIDC_ISSUER and OIDC_AUDIENCE are required when OIDC_JWKS_URL is configured")
+	}
 	jwks := (*keyfunc.JWKS)(nil)
 	if jwksURL != "" {
 		var err error
@@ -132,38 +177,87 @@ func main() {
 		db:           conn,
 		dbName:       dbName,
 		apiKeys:      apiKeys,
+		adminAPIKeys: adminAPIKeys,
+		adminUsers:   adminUsers,
 		jwks:         jwks,
-		oidcIssuer:   strings.TrimSpace(os.Getenv("OIDC_ISSUER")),
-		oidcAudience: strings.TrimSpace(os.Getenv("OIDC_AUDIENCE")),
+		oidcIssuer:   oidcIssuer,
+		oidcAudience: oidcAudience,
+	}
+	var store *platformStore
+	if dsn := platformDSNFromEnv(); dsn != "" {
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+		secretValue := strings.TrimSpace(os.Getenv("PLATFORM_JWT_SECRET"))
+		if secretValue == "" {
+			log.Fatal("PLATFORM_JWT_SECRET is required when POSTGRES_DSN or DATABASE_URL is configured")
+		}
+		var err error
+		store, err = newPlatformStore(ctx, dsn, []byte(secretValue))
+		if err != nil {
+			log.Fatalf("failed to initialize platform identity database: %v", err)
+		}
+		if err := seedPlatformAdminFromEnv(ctx, store); err != nil {
+			log.Fatalf("failed to seed platform admin: %v", err)
+		}
+		server.platform = store
+		server.userKeys = store
 	}
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("/health", func(w http.ResponseWriter, _ *http.Request) {
-		writeJSON(w, http.StatusOK, map[string]any{"ok": true})
+		if strings.TrimSpace(server.runtimeInit) != "" {
+			writeJSON(w, http.StatusServiceUnavailable, map[string]any{
+				"ok":                  false,
+				"runtime_initialized": false,
+				"runtime_error":       server.runtimeInit,
+			})
+			return
+		}
+		writeJSON(w, http.StatusOK, map[string]any{
+			"ok":                  true,
+			"runtime_initialized": true,
+		})
 	})
-	mux.Handle("/api/events", server.auth(http.HandlerFunc(server.handleEvents)))
-	mux.Handle("/api/stats", server.auth(http.HandlerFunc(server.handleStats)))
-	mux.Handle("/api/sources", server.auth(http.HandlerFunc(server.handleSources)))
-	mux.Handle("/api/event-types", server.auth(http.HandlerFunc(server.handleEventTypes)))
-	mux.Handle("/api/events/filter", server.auth(http.HandlerFunc(server.handleEventsFilter)))
+	mux.HandleFunc("/api/auth/login", server.handleLogin)
+	mux.HandleFunc("/api/auth/signup", server.handleSignup)
+	mux.Handle("/api/events", server.auth(server.requireRole(roleAdmin, http.HandlerFunc(server.handleEvents))))
+	mux.Handle("/api/stats", server.auth(server.requireRole(roleAdmin, http.HandlerFunc(server.handleStats))))
+	mux.Handle("/api/sources", server.auth(server.requireRole(roleAdmin, http.HandlerFunc(server.handleSources))))
+	mux.Handle("/api/event-types", server.auth(server.requireRole(roleAdmin, http.HandlerFunc(server.handleEventTypes))))
+	mux.Handle("/api/events/filter", server.auth(server.requireRole(roleAdmin, http.HandlerFunc(server.handleEventsFilter))))
+	mux.Handle("/api/auth/me", server.auth(http.HandlerFunc(server.handleAuthMe)))
+	mux.Handle("/api/user/registry-credentials", server.auth(http.HandlerFunc(server.handleRegistryCredentials)))
+	mux.Handle("/api/user/registry-credentials/", server.auth(http.HandlerFunc(server.handleRegistryCredentialItem)))
 
 	// Initialize and register runtime server with Kubernetes support
 	runtimeServer, err := NewRuntimeServer(conn, dbName, apiKeys)
 	if err != nil {
-		log.Printf("runtime server initialization warning: %v", err)
+		server.runtimeInit = err.Error()
+		log.Printf("ERROR: runtime server initialization failed: %v", err)
 	} else {
+		server.runtime = runtimeServer
+		if server.userKeys == nil {
+			server.userKeys = runtimeServer
+		}
 		// Register all runtime endpoints with auth
-		mux.Handle("/api/dashboard/summary", server.auth(http.HandlerFunc(runtimeServer.handleDashboardSummary)))
+		mux.Handle("/api/dashboard/summary", server.auth(server.requireRole(roleAdmin, http.HandlerFunc(runtimeServer.handleDashboardSummary))))
 		mux.Handle("/api/runtime/servers", server.auth(http.HandlerFunc(runtimeServer.handleRuntimeServers)))
+		mux.Handle("/api/deployments", server.auth(http.HandlerFunc(runtimeServer.handleDeployments)))
+		mux.Handle("/api/deployments/", server.auth(http.HandlerFunc(runtimeServer.handleDeploymentItem)))
+		mux.Handle("/api/admin/namespaces", server.auth(server.requireRole(roleAdmin, http.HandlerFunc(server.handleAdminNamespaces))))
+		mux.Handle("/api/admin/deployments", server.auth(server.requireRole(roleAdmin, http.HandlerFunc(runtimeServer.handleAdminDeployments))))
 		mux.Handle("/api/runtime/grants", server.auth(http.HandlerFunc(runtimeServer.handleRuntimeGrants)))
 		mux.Handle("/api/runtime/sessions", server.auth(http.HandlerFunc(runtimeServer.handleRuntimeSessions)))
 		mux.Handle("/api/runtime/components", server.auth(http.HandlerFunc(runtimeServer.handleRuntimeComponents)))
 		mux.Handle("/api/runtime/policy", server.auth(http.HandlerFunc(runtimeServer.handleRuntimePolicy)))
-		mux.Handle("/api/runtime/actions/restart", server.auth(http.HandlerFunc(runtimeServer.handleActionRestart)))
-		// Grant toggle endpoints (POST /api/runtime/grants/{namespace}/{name}/disable|enable)
-		mux.Handle("/api/runtime/grants/", server.auth(http.HandlerFunc(runtimeServer.handleGrantTogglePath)))
-		// Session toggle endpoints (POST /api/runtime/sessions/{namespace}/{name}/revoke|unrevoke)
-		mux.Handle("/api/runtime/sessions/", server.auth(http.HandlerFunc(runtimeServer.handleSessionTogglePath)))
+		mux.Handle("/api/runtime/actions/restart", server.auth(server.requireRole(roleAdmin, http.HandlerFunc(runtimeServer.handleActionRestart))))
+		// Grant item (POST /api/runtime/grants/{ns}/{name}/disable|enable, DELETE /api/runtime/grants/{ns}/{name})
+		mux.Handle("/api/runtime/grants/", server.auth(http.HandlerFunc(runtimeServer.handleGrantItemPath)))
+		// Session item (POST /api/runtime/sessions/{ns}/{name}/revoke|unrevoke, DELETE /api/runtime/sessions/{ns}/{name})
+		mux.Handle("/api/runtime/sessions/", server.auth(http.HandlerFunc(runtimeServer.handleSessionItemPath)))
+		// User-scoped API key lifecycle.
+		mux.Handle("/api/user/api-keys", server.auth(http.HandlerFunc(server.handleUserAPIKeys)))
+		mux.Handle("/api/user/api-keys/", server.auth(http.HandlerFunc(server.handleUserAPIKeyItem)))
 	}
 
 	shutdown, err := initTracer("mcp-sentinel-api")
@@ -177,22 +271,16 @@ func main() {
 		}()
 	}
 
-	go func() {
-		metricsMux := http.NewServeMux()
-		metricsMux.Handle("/metrics", promhttp.Handler())
-		metricsServer := &http.Server{
-			Addr:              ":" + metricsPort,
-			Handler:           metricsMux,
-			ReadHeaderTimeout: 5 * time.Second,
-			ReadTimeout:       15 * time.Second,
-			WriteTimeout:      15 * time.Second,
-			IdleTimeout:       60 * time.Second,
-		}
-		if err := metricsServer.ListenAndServe(); err != nil {
-			log.Printf("metrics server stopped: %v", err)
-		}
-	}()
-
+	metricsMux := http.NewServeMux()
+	metricsMux.Handle("/metrics", promhttp.Handler())
+	metricsServer := &http.Server{
+		Addr:              ":" + metricsPort,
+		Handler:           metricsMux,
+		ReadHeaderTimeout: 5 * time.Second,
+		ReadTimeout:       15 * time.Second,
+		WriteTimeout:      15 * time.Second,
+		IdleTimeout:       60 * time.Second,
+	}
 	log.Printf("mcp-sentinel-api listening on :%s", port)
 	handler := otelhttp.NewHandler(logRequests(mux), "http.server")
 	httpServer := &http.Server{
@@ -203,8 +291,38 @@ func main() {
 		WriteTimeout:      15 * time.Second,
 		IdleTimeout:       60 * time.Second,
 	}
-	if err := httpServer.ListenAndServe(); err != nil {
-		log.Fatalf("server failed: %v", err)
+
+	shutdownSignals, stopSignals := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stopSignals()
+	serverErrs := make(chan error, 2)
+	go func() {
+		if err := metricsServer.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
+			serverErrs <- fmt.Errorf("metrics server failed: %w", err)
+		}
+	}()
+	go func() {
+		if err := httpServer.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
+			serverErrs <- fmt.Errorf("api server failed: %w", err)
+		}
+	}()
+
+	select {
+	case <-shutdownSignals.Done():
+		log.Printf("shutdown signal received")
+	case err := <-serverErrs:
+		log.Printf("%v", err)
+	}
+
+	shutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	if err := httpServer.Shutdown(shutdownCtx); err != nil && !errors.Is(err, http.ErrServerClosed) {
+		log.Printf("api shutdown error: %v", err)
+	}
+	if err := metricsServer.Shutdown(shutdownCtx); err != nil && !errors.Is(err, http.ErrServerClosed) {
+		log.Printf("metrics shutdown error: %v", err)
+	}
+	if store != nil {
+		store.close()
 	}
 }
 
@@ -469,55 +587,156 @@ func scanEventRow(scanner rowScanner, row *eventRow) error {
 	return nil
 }
 
-// auth is middleware that enforces API key authentication.
-// It checks for x-api-key header or supports optional OIDC JWT validation.
-// If neither API keys nor OIDC JWT validation are configured, requests are rejected.
+// auth is middleware that authenticates via:
+//  1. Static service keys (API_KEYS / ADMIN_API_KEYS)
+//  2. User-generated API keys (runtime store)
+//  3. OIDC JWT Bearer tokens
 func (s *apiServer) auth(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if len(s.apiKeys) > 0 {
-			apiKey := strings.TrimSpace(r.Header.Get("x-api-key"))
-			if apiKey != "" {
-				if _, ok := s.apiKeys[apiKey]; ok {
-					next.ServeHTTP(w, r)
-					return
-				}
-			}
-		}
-
-		token := extractBearer(r.Header.Get("authorization"))
-		if token != "" && s.jwks != nil {
-			parser := jwt.NewParser(jwt.WithValidMethods([]string{"RS256", "RS384", "RS512", "ES256", "ES384", "ES512"}))
-			parsed, err := parser.Parse(token, s.jwks.Keyfunc)
-			if err == nil && parsed.Valid {
-				if s.oidcIssuer != "" || s.oidcAudience != "" {
-					claims, ok := parsed.Claims.(jwt.MapClaims)
-					if !ok {
-						writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "invalid_token"})
-						return
-					}
-					if s.oidcIssuer != "" && claims["iss"] != s.oidcIssuer {
-						writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "invalid_token"})
-						return
-					}
-					if s.oidcAudience != "" {
-						if !audienceMatches(claims["aud"], s.oidcAudience) {
-							writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "invalid_token"})
-							return
-						}
-					}
-				}
-				next.ServeHTTP(w, r)
-				return
-			}
+		if p, ok, err := s.authenticateRequest(r); err != nil {
+			log.Printf("auth error: %v", err)
+			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "auth_failed"})
+			return
+		} else if ok {
+			ctx := context.WithValue(r.Context(), principalContextKey{}, p)
+			next.ServeHTTP(w, r.WithContext(ctx))
+			return
 		}
 
 		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "unauthorized"})
 	})
 }
 
+func (s *apiServer) authenticateRequest(r *http.Request) (principal, bool, error) {
+	apiKey := strings.TrimSpace(r.Header.Get("x-api-key"))
+	if apiKey != "" {
+		if _, ok := s.apiKeys[apiKey]; ok {
+			role := roleAdmin // backward-compatible default when ADMIN_API_KEYS is unset.
+			if len(s.adminAPIKeys) > 0 {
+				// When ADMIN_API_KEYS is configured, API_KEYS values not present in
+				// ADMIN_API_KEYS are intentionally demoted to role=user.
+				role = roleUser
+				if _, admin := s.adminAPIKeys[apiKey]; admin {
+					role = roleAdmin
+				}
+			}
+			return principal{Role: role, AuthType: "service_api_key", IsService: true}, true, nil
+		}
+		if s.userKeys != nil {
+			p, ok, err := s.userKeys.AuthenticateUserAPIKey(r.Context(), apiKey)
+			if err != nil {
+				return principal{}, false, err
+			}
+			if ok {
+				return p, true, nil
+			}
+		}
+	}
+
+	token := extractBearer(r.Header.Get("authorization"))
+	if token == "" {
+		return principal{}, false, nil
+	}
+	if s.platform != nil {
+		if p, ok := s.platform.AuthenticateJWT(token); ok {
+			return p, true, nil
+		}
+	}
+	if s.jwks == nil {
+		return principal{}, false, nil
+	}
+	parser := jwt.NewParser(jwt.WithValidMethods([]string{"RS256", "RS384", "RS512", "ES256", "ES384", "ES512"}))
+	parsed, err := parser.Parse(token, s.jwks.Keyfunc)
+	if err != nil || !parsed.Valid {
+		return principal{}, false, nil
+	}
+	claims, ok := parsed.Claims.(jwt.MapClaims)
+	if !ok {
+		return principal{}, false, nil
+	}
+	if s.oidcIssuer == "" || s.oidcAudience == "" {
+		return principal{}, false, nil
+	}
+	if claims["iss"] != s.oidcIssuer {
+		return principal{}, false, nil
+	}
+	if !audienceMatches(claims["aud"], s.oidcAudience) {
+		return principal{}, false, nil
+	}
+	sub := strings.TrimSpace(fmt.Sprint(claims["sub"]))
+	email := strings.ToLower(strings.TrimSpace(fmt.Sprint(claims["email"])))
+	emailVerified, emailVerifiedPresent := emailVerifiedClaim(claims["email_verified"])
+	role := roleUser
+	if _, ok := s.adminUsers[sub]; ok {
+		role = roleAdmin
+	}
+	if email != "" {
+		if !emailVerifiedPresent || emailVerified {
+			if _, ok := s.adminUsers[email]; ok {
+				role = roleAdmin
+			}
+		}
+	}
+	return principal{
+		Role:     role,
+		Subject:  sub,
+		Email:    email,
+		AuthType: "oidc_jwt",
+	}, true, nil
+}
+
+func (s *apiServer) requireRole(role string, next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		p, ok := principalFromContext(r.Context())
+		if !ok || p.Role != role {
+			writeJSON(w, http.StatusForbidden, map[string]string{"error": "forbidden"})
+			return
+		}
+		next.ServeHTTP(w, r)
+	})
+}
+
+func (s *apiServer) handleAuthMe(w http.ResponseWriter, r *http.Request) {
+	p, ok := principalFromContext(r.Context())
+	if !ok {
+		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "unauthorized"})
+		return
+	}
+	type authPrincipal struct {
+		Role      string `json:"role"`
+		Subject   string `json:"subject,omitempty"`
+		Email     string `json:"email,omitempty"`
+		Namespace string `json:"namespace,omitempty"`
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"authenticated": true,
+		"principal": authPrincipal{
+			Role:      p.Role,
+			Subject:   p.Subject,
+			Email:     p.Email,
+			Namespace: p.Namespace,
+		},
+	})
+}
+
 // audienceMatches validates if the JWT audience claim matches the expected value.
 func audienceMatches(audClaim any, expected string) bool {
 	return serviceutil.AudienceMatches(audClaim, expected)
+}
+
+func emailVerifiedClaim(claim any) (bool, bool) {
+	switch v := claim.(type) {
+	case bool:
+		return v, true
+	case string:
+		switch strings.ToLower(strings.TrimSpace(v)) {
+		case "true", "1", "yes":
+			return true, true
+		case "false", "0", "no":
+			return false, true
+		}
+	}
+	return false, false
 }
 
 // extractBearer extracts the JWT token from an Authorization header.
@@ -547,6 +766,7 @@ func logRequests(next http.Handler) http.Handler {
 		start := time.Now()
 		recorder := &statusRecorder{ResponseWriter: w, status: http.StatusOK}
 		next.ServeHTTP(recorder, r)
+		// #nosec G706 -- request method/path are operational logs, not used for command execution.
 		log.Printf("%s %s %d %s", r.Method, r.URL.Path, recorder.status, time.Since(start))
 	})
 }
@@ -564,6 +784,26 @@ func boolEnv(key string) (bool, bool) {
 // envOr returns the value of an environment variable or a fallback if not set.
 func envOr(key, fallback string) string {
 	return serviceutil.EnvOr(key, fallback)
+}
+
+func splitCSVSet(raw string) map[string]struct{} {
+	out := map[string]struct{}{}
+	for _, part := range strings.Split(raw, ",") {
+		part = strings.TrimSpace(part)
+		if part == "" {
+			continue
+		}
+		out[part] = struct{}{}
+	}
+	return out
+}
+
+func maskCredentialForLog(value string) string {
+	v := strings.TrimSpace(value)
+	if len(v) <= 6 {
+		return "***"
+	}
+	return v[:3] + "..." + v[len(v)-2:]
 }
 
 // queryInt extracts an integer value from URL query parameters.
