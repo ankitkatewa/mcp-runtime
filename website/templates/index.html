@@ -4,17 +4,17 @@
   <section class="hero container" aria-labelledby="hero-title">
     <div class="hero-copy reveal">
       <span class="eyebrow">Spec 00 · MCP infrastructure for Kubernetes · Alpha</span>
-      <h1 id="hero-title">The control plane for company MCP servers.</h1>
+      <h1 id="hero-title">Deploy, govern, and broker MCP servers using a Kubernetes-native control plane.</h1>
       <p class="lede">
-        MCP Runtime gives companies a manager, registry, broker, and infrastructure layer
-        to manage, deploy, govern, and use Model Context Protocol servers. Platform teams
-        define services once, enforce access on the live request path, and give AI agents
-        a controlled way to reach internal tools.
+        MCP Runtime gives platform teams one place to deploy, route, govern, and observe
+        Model Context Protocol servers. Define services once, enforce policy on the live
+        request path, and give AI agents a controlled way to reach internal tools.
       </p>
       <p class="lede">
         The public entrypoint at <a href="{{ platform_url }}">platform.mcpruntime.org</a>
         shows the marketplace-style experience. When a company deploys MCP Runtime in its
-        own cluster, it gets that same platform model on infrastructure it controls.
+        own cluster, it gets that same platform model on infrastructure it controls across
+        vendor-neutral Kubernetes distributions.
       </p>
       <div class="hero-actions" aria-label="Primary actions">
         <a class="button primary" href="{{ platform_url }}">Open hosted platform</a>
@@ -105,19 +105,19 @@ spec:
       <span class="section-label">03 / Capabilities</span>
       <h2 id="features-title">Built for enterprise MCP operations.</h2>
       <p>
-        MCP Runtime turns scattered MCP experiments into a company platform: install the
-        control plane, publish servers, grant access, broker requests, and watch policy
-        and traffic from one place.
+        MCP Runtime turns scattered MCP experiments into one operating surface for platform
+        teams: deploy servers, apply access policy, broker requests, and inspect audit and
+        traffic data from one place.
       </p>
     </div>
     <div class="features-grid">
       <article class="feature-card">
         <h3>Managed deployments</h3>
-        <p>Define MCP servers once as Kubernetes CRDs. The operator handles services, rollouts, routes, and updates.</p>
+        <p>Define MCP servers once as Kubernetes CRDs. The operator handles services, rollouts, routes, and updates in a GitOps-friendly workflow.</p>
       </article>
       <article class="feature-card accent">
         <h3>Company access model</h3>
-        <p>Grants and sessions make consent, trust level, expiry, and revocation inspectable Kubernetes resources.</p>
+        <p>Grants and sessions make consent, trust level, expiry, and revocation inspectable Kubernetes resources so governed access is the default path.</p>
       </article>
       <article class="feature-card">
         <h3>Hosted platform shape</h3>
@@ -129,7 +129,7 @@ spec:
       </article>
       <article class="feature-card">
         <h3>Operational visibility</h3>
-        <p>Observe MCP calls with policy decisions, timing, tool names, status, and dashboard-ready event data.</p>
+        <p>Observe MCP calls with policy decisions, timing, tool names, status, and dashboard-ready event data instead of treating agent traffic like unstructured logs.</p>
       </article>
       <article class="feature-card accent">
         <h3>Audit-ready history</h3>
@@ -200,7 +200,7 @@ spec:
     <div class="section-heading compact">
       <span class="section-label">06 / Targets</span>
       <h2 id="platforms-title">Runs where your company already runs Kubernetes.</h2>
-      <p>Kubernetes 1.25+. Self-hosted. Open source. No proprietary control plane.</p>
+      <p>Kubernetes 1.25+. Self-hosted. Open source. Vendor-neutral across Kubernetes distributions. No proprietary control plane.</p>
     </div>
     <div class="platforms-list" aria-label="Supported Kubernetes environments">
       <span class="platform-badge">k3s</span>

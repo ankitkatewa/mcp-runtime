@@ -1,8 +1,8 @@
 # Website
 
-Minimal Flask landing page for MCP Runtime, an open source manager, registry,
-broker, and infrastructure layer for company MCP servers. Serves a single home
-page with links to GitHub and the documentation site.
+Minimal Flask landing page for MCP Runtime. The site positions the product as a
+Kubernetes-native control plane to deploy, govern, and broker MCP servers, and
+serves a single home page with links to GitHub and the documentation site.
 
 Documentation lives at `docs.mcpruntime.org` (deployed separately) and is
 authored as Markdown under [`../docs/`](../docs/) at the repo root. Any
