@@ -48,6 +48,10 @@ const (
 	DefaultIngressClass = "traefik"
 	// DefaultIngressPathType is the default path type for ingress rules.
 	DefaultIngressPathType = "Prefix"
+	// IngressReadinessModeStrict requires Ingress.status.loadBalancer.ingress to be populated.
+	IngressReadinessModeStrict = "strict"
+	// IngressReadinessModePermissive treats an Ingress with rules as ready when LB status is absent.
+	IngressReadinessModePermissive = "permissive"
 )
 
 // Requeue delays for reconciliation.

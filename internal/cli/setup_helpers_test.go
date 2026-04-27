@@ -243,6 +243,17 @@ func TestOperatorEnvOverrides(t *testing.T) {
 		}
 	})
 
+	t.Run("includes ingress readiness mode when configured", func(t *testing.T) {
+		DefaultCLIConfig = &CLIConfig{IngressReadinessMode: "permissive"}
+		got := operatorEnvOverrides("")
+		if len(got) != 2 {
+			t.Fatalf("expected analytics plus ingress readiness env overrides, got %v", got)
+		}
+		if got[1].Name != "MCP_INGRESS_READINESS_MODE" || got[1].Value != "permissive" {
+			t.Fatalf("unexpected ingress readiness env override: %+v", got[1])
+		}
+	})
+
 	t.Run("includes registry endpoint and ingress host when configured", func(t *testing.T) {
 		DefaultCLIConfig = &CLIConfig{
 			RegistryEndpoint:    "10.43.39.164:5000",

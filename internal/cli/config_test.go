@@ -59,6 +59,7 @@ func TestLoadCLIConfigWithProvisionedRegistry(t *testing.T) {
 	t.Setenv("MCP_OPERATOR_IMAGE", "example/operator:latest")
 	t.Setenv("MCP_GATEWAY_PROXY_IMAGE", "example/mcp-proxy:latest")
 	t.Setenv("MCP_SENTINEL_INGEST_URL", "http://mcp-sentinel-ingest.mcp-sentinel.svc.cluster.local:8081/events")
+	t.Setenv("MCP_INGRESS_READINESS_MODE", "permissive")
 	t.Setenv("MCP_DEFAULT_SERVER_PORT", "9000")
 	t.Setenv("PROVISIONED_REGISTRY_URL", "registry.mcpruntime.com")
 	t.Setenv("PROVISIONED_REGISTRY_USERNAME", "user")
@@ -94,6 +95,9 @@ func TestLoadCLIConfigWithProvisionedRegistry(t *testing.T) {
 	}
 	if cfg.AnalyticsIngestURL != "http://mcp-sentinel-ingest.mcp-sentinel.svc.cluster.local:8081/events" {
 		t.Fatalf("expected analytics ingest url override, got %q", cfg.AnalyticsIngestURL)
+	}
+	if cfg.IngressReadinessMode != "permissive" {
+		t.Fatalf("expected ingress readiness mode override, got %q", cfg.IngressReadinessMode)
 	}
 	if cfg.DefaultServerPort != 9000 {
 		t.Fatalf("expected default server port 9000, got %d", cfg.DefaultServerPort)

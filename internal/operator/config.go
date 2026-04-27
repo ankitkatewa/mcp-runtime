@@ -3,6 +3,7 @@ package operator
 import (
 	"os"
 	"strconv"
+	"strings"
 )
 
 // OperatorConfig holds configuration for the operator loaded from environment variables.
@@ -12,6 +13,9 @@ type OperatorConfig struct {
 
 	// DefaultIngressClass is the ingress class to use.
 	DefaultIngressClass string
+
+	// IngressReadinessMode controls how ingress readiness is evaluated.
+	IngressReadinessMode string
 
 	// ProvisionedRegistryURL is the URL of the provisioned registry.
 	ProvisionedRegistryURL string
@@ -43,9 +47,11 @@ type OperatorConfig struct {
 
 // LoadOperatorConfig loads operator configuration from environment variables.
 func LoadOperatorConfig() *OperatorConfig {
+	ingressReadinessMode, _ := NormalizeIngressReadinessMode(os.Getenv("MCP_INGRESS_READINESS_MODE"))
 	cfg := &OperatorConfig{
 		DefaultIngressHost:            getEnvCompat("MCP_DEFAULT_INGRESS_HOST", "DEFAULT_INGRESS_HOST"),
 		DefaultIngressClass:           getEnvOrDefault("DEFAULT_INGRESS_CLASS", DefaultIngressClass),
+		IngressReadinessMode:          ingressReadinessMode,
 		ProvisionedRegistryURL:        os.Getenv("PROVISIONED_REGISTRY_URL"),
 		ProvisionedRegistryUsername:   os.Getenv("PROVISIONED_REGISTRY_USERNAME"),
 		ProvisionedRegistryPassword:   os.Getenv("PROVISIONED_REGISTRY_PASSWORD"),
@@ -100,6 +106,19 @@ func getEnvCompat(keys ...string) string {
 		}
 	}
 	return ""
+}
+
+// NormalizeIngressReadinessMode returns a supported ingress readiness mode.
+// Empty or invalid values fall back to strict mode.
+func NormalizeIngressReadinessMode(value string) (string, bool) {
+	switch strings.ToLower(strings.TrimSpace(value)) {
+	case "", IngressReadinessModeStrict:
+		return IngressReadinessModeStrict, true
+	case IngressReadinessModePermissive:
+		return IngressReadinessModePermissive, true
+	default:
+		return IngressReadinessModeStrict, false
+	}
 }
 
 // DefaultOperatorConfig is the default configuration loaded at startup.

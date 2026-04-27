@@ -46,11 +46,16 @@ func main() {
 	if registryConfig != nil {
 		setupLog.Info("Provisioned registry configured", "url", registryConfig.URL)
 	}
+	ingressReadinessMode, ingressReadinessModeValid := ingressReadinessModeFromEnv(os.Getenv)
+	if !ingressReadinessModeValid {
+		setupLog.Info("Invalid MCP_INGRESS_READINESS_MODE; defaulting to strict", "value", os.Getenv("MCP_INGRESS_READINESS_MODE"))
+	}
 
 	if err = (&operator.MCPServerReconciler{
 		Client:                    mgr.GetClient(),
 		Scheme:                    mgr.GetScheme(),
 		DefaultIngressHost:        os.Getenv("MCP_DEFAULT_INGRESS_HOST"),
+		IngressReadinessMode:      ingressReadinessMode,
 		ProvisionedRegistry:       registryConfig,
 		GatewayProxyImage:         gatewayProxyImageFromEnv(os.Getenv),
 		DefaultAnalyticsIngestURL: analyticsIngestURLFromEnv(os.Getenv),
@@ -157,6 +162,10 @@ func clusterNameFromEnv(getenv func(string) string) string {
 		return value
 	}
 	return "local"
+}
+
+func ingressReadinessModeFromEnv(getenv func(string) string) (string, bool) {
+	return operator.NormalizeIngressReadinessMode(getenv("MCP_INGRESS_READINESS_MODE"))
 }
 
 func webhooksEnabledFromEnv(getenv func(string) string) bool {

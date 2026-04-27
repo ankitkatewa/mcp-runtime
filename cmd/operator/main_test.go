@@ -91,6 +91,38 @@ func TestAnalyticsIngestURLFromEnv(t *testing.T) {
 	})
 }
 
+func TestIngressReadinessModeFromEnv(t *testing.T) {
+	t.Run("defaults to strict when unset", func(t *testing.T) {
+		getenv := func(string) string { return "" }
+		got, valid := ingressReadinessModeFromEnv(getenv)
+		if got != operator.IngressReadinessModeStrict || !valid {
+			t.Fatalf("unexpected readiness mode: %q valid=%v", got, valid)
+		}
+	})
+
+	t.Run("returns permissive when configured", func(t *testing.T) {
+		env := map[string]string{
+			"MCP_INGRESS_READINESS_MODE": "permissive",
+		}
+		getenv := func(key string) string { return env[key] }
+		got, valid := ingressReadinessModeFromEnv(getenv)
+		if got != operator.IngressReadinessModePermissive || !valid {
+			t.Fatalf("unexpected readiness mode: %q valid=%v", got, valid)
+		}
+	})
+
+	t.Run("invalid falls back to strict", func(t *testing.T) {
+		env := map[string]string{
+			"MCP_INGRESS_READINESS_MODE": "dev",
+		}
+		getenv := func(key string) string { return env[key] }
+		got, valid := ingressReadinessModeFromEnv(getenv)
+		if got != operator.IngressReadinessModeStrict || valid {
+			t.Fatalf("unexpected readiness mode: %q valid=%v", got, valid)
+		}
+	})
+}
+
 func TestParseConfig(t *testing.T) {
 	t.Run("defaults", func(t *testing.T) {
 		fs := flag.NewFlagSet("test", flag.ContinueOnError)
