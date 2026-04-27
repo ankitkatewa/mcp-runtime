@@ -11,8 +11,14 @@
         define services once, enforce access on the live request path, and give AI agents
         a controlled way to reach internal tools.
       </p>
+      <p class="lede">
+        The public entrypoint at <a href="{{ platform_url }}">platform.mcpruntime.org</a>
+        shows the marketplace-style experience. When a company deploys MCP Runtime in its
+        own cluster, it gets that same platform model on infrastructure it controls.
+      </p>
       <div class="hero-actions" aria-label="Primary actions">
-        <a class="button primary" href="{{ docs_url }}getting-started/">Install the platform</a>
+        <a class="button primary" href="{{ platform_url }}">Open hosted platform</a>
+        <a class="button secondary" href="{{ docs_url }}getting-started/">Install the platform</a>
         <a class="button secondary" href="{{ github_url }}">View GitHub</a>
       </div>
     </div>
@@ -114,6 +120,10 @@ spec:
         <p>Grants and sessions make consent, trust level, expiry, and revocation inspectable Kubernetes resources.</p>
       </article>
       <article class="feature-card">
+        <h3>Hosted platform shape</h3>
+        <p>The public <code>platform.mcpruntime.org</code> experience works like a shared MCP marketplace, and the same surface can be deployed privately per company cluster.</p>
+      </article>
+      <article class="feature-card">
         <h3>Brokered tool calls</h3>
         <p>Route agent traffic through a gateway that can enforce policy before sensitive tools are executed.</p>
       </article>
@@ -172,6 +182,10 @@ spec:
         <p>Give teams a shared place to publish, discover, and operate MCP servers instead of one-off sidecars.</p>
       </article>
       <article class="use-case">
+        <h3>Private MCP marketplace</h3>
+        <p>Mirror the public platform experience inside a company cluster so teams browse approved MCP servers without depending on a third-party control plane.</p>
+      </article>
+      <article class="use-case">
         <h3>Cross-team governance</h3>
         <p>Grant temporary, reviewable access between teams with clear trust ceilings and easy revocation.</p>
       </article>
@@ -202,9 +216,10 @@ spec:
 
   <section class="container cta-band" aria-labelledby="cta-title">
     <span class="section-label">Next action</span>
-    <h2 id="cta-title">Start with one governed MCP server.</h2>
-    <p>Install the platform, deploy a server, issue access, and prove that MCP can be managed like company infrastructure.</p>
+    <h2 id="cta-title">Try the hosted platform, then run the same model yourself.</h2>
+    <p>Open the public platform, then install MCP Runtime in your own cluster to give your company the same marketplace-style control surface with private infrastructure underneath.</p>
     <div class="hero-actions">
+      <a class="button primary" href="{{ platform_url }}">Open platform.mcpruntime.org</a>
       <a class="button primary" href="{{ docs_url }}getting-started/">Open install guide</a>
       <a class="button secondary" href="{{ docs_url }}architecture/">Read architecture</a>
     </div>

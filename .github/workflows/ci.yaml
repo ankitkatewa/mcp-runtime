@@ -359,7 +359,6 @@ jobs:
           test -n "$WEBSITE_DEPLOY_USER"
           test -n "$WEBSITE_DEPLOY_PATH"
           test -n "$WEBSITE_DEPLOY_SSH_KEY"
-          test -n "$WEBSITE_BASE_URL"
 
       - name: Set up SSH key
         env:
