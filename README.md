@@ -7,9 +7,12 @@
 [![Coverage](https://codecov.io/gh/Agent-Hellboy/mcp-runtime/branch/main/graph/badge.svg)](https://codecov.io/gh/Agent-Hellboy/mcp-runtime/branch/main)
 [![Go Report Card](https://goreportcard.com/badge/github.com/Agent-Hellboy/mcp-runtime)](https://goreportcard.com/report/github.com/Agent-Hellboy/mcp-runtime)
 
-MCP Runtime is a self-hosted Kubernetes control plane for internal Model Context Protocol servers. It provides declarative MCP server deployment, registry workflows, operator reconciliation, request-path governance, access/session resources, audit, analytics, and dashboards.
+MCP Runtime is a self-hosted Kubernetes control plane for internal Model Context Protocol servers. It provides declarative MCP server deployment, registry workflows, operator reconciliation, request-path governance, access/session resources, audit, analytics, dashboards, and a marketplace-style platform surface for browsing and operating MCP servers.
+
+The public platform at `platform.mcpruntime.org` shows the hosted experience. Companies can deploy the same model in their own Kubernetes clusters and operate it through both the CLI and the platform UI.
 
 - Website: https://mcpruntime.org/
+- Platform: https://platform.mcpruntime.org/ for the public marketplace-style experience; companies can deploy the same platform model in their own clusters
 - Docs: https://docs.mcpruntime.org/ and [`docs/`](docs/)
 - API reference: https://docs.mcpruntime.org/api and [`docs/api.md`](docs/api.md)
 
@@ -18,6 +21,7 @@ MCP Runtime is a self-hosted Kubernetes control plane for internal Model Context
 ## What ships
 
 - `mcp-runtime` CLI for `setup`, `status`, `registry`, `server`, `pipeline`, `cluster`, `access`, and `sentinel`
+- Platform UI for browsing MCP servers, viewing platform state, and operating the stack through a web interface
 - `MCPServer`, `MCPAccessGrant`, and `MCPAgentSession` CRDs
 - Kubernetes operator for `Deployment`, `Service`, `Ingress`, and policy materialization
 - Internal or provisioned registry workflows
