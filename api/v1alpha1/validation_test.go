@@ -73,3 +73,126 @@ func TestMCPServerValidatePublicPathPrefix(t *testing.T) {
 		t.Fatalf("expected publicPathPrefix validation error, got %v", err)
 	}
 }
+
+func TestMCPServerDefault(t *testing.T) {
+	server := &MCPServer{
+		ObjectMeta: metav1.ObjectMeta{Name: "test-server"},
+		Spec: MCPServerSpec{
+			Image: "example.com/mcp-server",
+		},
+	}
+
+	server.Default()
+
+	if server.Spec.ImageTag != "latest" {
+		t.Fatalf("expected imageTag default, got %q", server.Spec.ImageTag)
+	}
+	if server.Spec.Replicas == nil || *server.Spec.Replicas != 1 {
+		t.Fatalf("expected replicas default, got %v", server.Spec.Replicas)
+	}
+	if server.Spec.Port != 8088 {
+		t.Fatalf("expected port default, got %d", server.Spec.Port)
+	}
+	if server.Spec.ServicePort != 80 {
+		t.Fatalf("expected service port default, got %d", server.Spec.ServicePort)
+	}
+	if server.Spec.IngressPath != "/test-server/mcp" {
+		t.Fatalf("expected ingressPath default, got %q", server.Spec.IngressPath)
+	}
+	if server.Spec.PublicPathPrefix != "test-server" {
+		t.Fatalf("expected publicPathPrefix default, got %q", server.Spec.PublicPathPrefix)
+	}
+	if server.Spec.IngressClass != "traefik" {
+		t.Fatalf("expected ingressClass default, got %q", server.Spec.IngressClass)
+	}
+}
+
+func TestMCPServerValidateCanaryRollout(t *testing.T) {
+	server := &MCPServer{
+		Spec: MCPServerSpec{
+			Image: "example.com/server",
+			Rollout: &RolloutConfig{
+				Strategy: RolloutStrategyCanary,
+			},
+		},
+	}
+
+	err := server.validate()
+	if err == nil {
+		t.Fatal("expected validation error for missing canaryReplicas")
+	}
+	if !strings.Contains(err.Error(), "canaryReplicas") {
+		t.Fatalf("expected canaryReplicas validation error, got %v", err)
+	}
+	if !strings.Contains(err.Error(), "spec.replicas") {
+		t.Fatalf("expected replicas validation error, got %v", err)
+	}
+}
+
+func TestMCPServerValidateOAuthIssuer(t *testing.T) {
+	server := &MCPServer{
+		Spec: MCPServerSpec{
+			Image:   "example.com/server",
+			Gateway: &GatewayConfig{Enabled: true},
+			Auth:    &AuthConfig{Mode: AuthModeOAuth},
+		},
+	}
+
+	err := server.validate()
+	if err == nil {
+		t.Fatal("expected validation error for missing OAuth issuer")
+	}
+	if !strings.Contains(err.Error(), "auth.issuerURL") {
+		t.Fatalf("expected auth.issuerURL validation error, got %v", err)
+	}
+}
+
+func TestMCPServerValidateRolloutValues(t *testing.T) {
+	server := &MCPServer{
+		Spec: MCPServerSpec{
+			Image: "example.com/server",
+			Rollout: &RolloutConfig{
+				MaxUnavailable: "bad-value",
+			},
+		},
+	}
+
+	err := server.validate()
+	if err == nil {
+		t.Fatal("expected validation error for invalid rollout value")
+	}
+	if !strings.Contains(err.Error(), "rollout.maxUnavailable") {
+		t.Fatalf("expected rollout.maxUnavailable validation error, got %v", err)
+	}
+}
+
+func TestMCPServerValidateIngressRequirements(t *testing.T) {
+	server := &MCPServer{
+		Spec: MCPServerSpec{
+			Image:       "example.com/server",
+			IngressPath: "/server",
+		},
+	}
+
+	err := server.validate()
+	if err == nil {
+		t.Fatal("expected validation error for missing ingressHost")
+	}
+	if !strings.Contains(err.Error(), "ingressHost") {
+		t.Fatalf("expected ingressHost validation error, got %v", err)
+	}
+
+	server = &MCPServer{
+		Spec: MCPServerSpec{
+			Image:       "example.com/server",
+			IngressHost: "example.com",
+		},
+	}
+	err = server.validate()
+	if err == nil {
+		t.Fatal("expected validation error for missing ingressPath")
+	}
+	if !strings.Contains(err.Error(), "ingressPath") {
+		t.Fatalf("expected ingressPath validation error, got %v", err)
+	}
+}

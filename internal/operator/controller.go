@@ -173,180 +173,34 @@ func (r *MCPServerReconciler) applyDefaultsIfNeeded(ctx context.Context, mcpServ
 }
 
 func (r *MCPServerReconciler) validateIngressConfig(ctx context.Context, mcpServer *mcpv1alpha1.MCPServer, logger logr.Logger) error {
-	if err := r.requireSpecField(ctx, mcpServer, logger, "ingress path", effectiveIngressPath(mcpServer),
-		"ingressPath is required; set spec.ingressPath or ensure metadata.name is set"); err != nil {
+	if _, err := mcpServer.ValidateCreate(); err != nil {
+		r.updateStatus(ctx, mcpServer, "Error", err.Error(), resourceReadiness{})
+		logOperatorError(logger, err, "Invalid ingress configuration")
 		return err
-	}
-	if strings.TrimSpace(mcpServer.Spec.PublicPathPrefix) == "" {
-		if err := r.requireSpecField(ctx, mcpServer, logger, "ingress host", effectiveIngressHost(mcpServer),
-			"ingressHost is required; set spec.ingressHost, set MCP_DEFAULT_INGRESS_HOST on the operator, or use spec.publicPathPrefix for hostless routing"); err != nil {
-			return err
-		}
 	}
 	return nil
 }
 
 func (r *MCPServerReconciler) validateGatewayConfig(ctx context.Context, mcpServer *mcpv1alpha1.MCPServer, logger logr.Logger) error {
+	if _, err := mcpServer.ValidateCreate(); err != nil {
+		r.updateStatus(ctx, mcpServer, "Error", err.Error(), resourceReadiness{})
+		logOperatorError(logger, err, "Invalid gateway configuration")
+		return err
+	}
+
 	if gatewayEnabled(mcpServer) {
-		if mcpServer.Spec.Gateway.Port == mcpServer.Spec.Port {
-			contextMap := map[string]any{
-				"mcpServer":    mcpServer.Name,
-				"namespace":    mcpServer.Namespace,
-				"gatewayPort":  mcpServer.Spec.Gateway.Port,
-				"serverPort":   mcpServer.Spec.Port,
-				"gatewayImage": mcpServer.Spec.Gateway.Image,
-			}
-			err := newOperatorError("gateway.port must be different from spec.port", contextMap)
-			r.updateStatus(ctx, mcpServer, "Error", err.Error(), resourceReadiness{})
-			logOperatorError(logger, err, "Invalid gateway port configuration")
-			return err
-		}
 		if _, err := r.resolveGatewayImage(mcpServer); err != nil {
 			r.updateStatus(ctx, mcpServer, "Error", err.Error(), resourceReadiness{})
 			logOperatorError(logger, err, "Missing gateway image")
 			return err
 		}
-		if mcpServer.Spec.Auth != nil && mcpServer.Spec.Auth.Mode == mcpv1alpha1.AuthModeOAuth {
-			if err := r.requireSpecField(ctx, mcpServer, logger, "issuer URL", mcpServer.Spec.Auth.IssuerURL,
-				"auth.issuerURL is required when auth.mode is oauth"); err != nil {
-				return err
-			}
-		}
-	}
-
-	for _, tool := range mcpServer.Spec.Tools {
-		if strings.TrimSpace(tool.Name) == "" {
-			contextMap := map[string]any{
-				"mcpServer": mcpServer.Name,
-				"namespace": mcpServer.Namespace,
-			}
-			err := newOperatorError("tools[].name is required", contextMap)
-			r.updateStatus(ctx, mcpServer, "Error", err.Error(), resourceReadiness{})
-			logOperatorError(logger, err, "Invalid tool definition")
-			return err
-		}
-	}
-
-	for _, secretEnv := range mcpServer.Spec.SecretEnvVars {
-		if strings.TrimSpace(secretEnv.Name) == "" || secretEnv.SecretKeyRef == nil ||
-			strings.TrimSpace(secretEnv.SecretKeyRef.Name) == "" || strings.TrimSpace(secretEnv.SecretKeyRef.Key) == "" {
-			contextMap := map[string]any{
-				"mcpServer": mcpServer.Name,
-				"namespace": mcpServer.Namespace,
-			}
-			err := newOperatorError("secretEnvVars require name and secretKeyRef.name/key", contextMap)
-			r.updateStatus(ctx, mcpServer, "Error", err.Error(), resourceReadiness{})
-			logOperatorError(logger, err, "Invalid secret-backed env var")
-			return err
-		}
-	}
-
-	if canaryEnabled(mcpServer) {
-		if mcpServer.Spec.Rollout.CanaryReplicas == nil || *mcpServer.Spec.Rollout.CanaryReplicas <= 0 {
-			contextMap := map[string]any{
-				"mcpServer": mcpServer.Name,
-				"namespace": mcpServer.Namespace,
-			}
-			err := newOperatorError("rollout.canaryReplicas must be greater than zero when rollout.strategy=Canary", contextMap)
-			r.updateStatus(ctx, mcpServer, "Error", err.Error(), resourceReadiness{})
-			logOperatorError(logger, err, "Invalid canary rollout")
-			return err
-		}
-		if mcpServer.Spec.Replicas == nil {
-			contextMap := map[string]any{
-				"mcpServer": mcpServer.Name,
-				"namespace": mcpServer.Namespace,
-			}
-			err := newOperatorError("spec.replicas must be set when rollout.strategy=Canary", contextMap)
-			r.updateStatus(ctx, mcpServer, "Error", err.Error(), resourceReadiness{})
-			logOperatorError(logger, err, "Missing replicas for canary rollout")
-			return err
-		}
-		if *mcpServer.Spec.Rollout.CanaryReplicas >= *mcpServer.Spec.Replicas {
-			contextMap := map[string]any{
-				"mcpServer":      mcpServer.Name,
-				"namespace":      mcpServer.Namespace,
-				"replicas":       *mcpServer.Spec.Replicas,
-				"canaryReplicas": *mcpServer.Spec.Rollout.CanaryReplicas,
-			}
-			err := newOperatorError("rollout.canaryReplicas must be less than spec.replicas", contextMap)
-			r.updateStatus(ctx, mcpServer, "Error", err.Error(), resourceReadiness{})
-			logOperatorError(logger, err, "Invalid canary replica split")
-			return err
-		}
-	}
-
-	if rollout := mcpServer.Spec.Rollout; rollout != nil {
-		if err := r.validateRolloutValue(ctx, mcpServer, logger, "rollout.maxUnavailable", rollout.MaxUnavailable); err != nil {
-			return err
-		}
-		if err := r.validateRolloutValue(ctx, mcpServer, logger, "rollout.maxSurge", rollout.MaxSurge); err != nil {
-			return err
-		}
 	}
 
 	if analyticsEnabled(mcpServer) {
-		if !gatewayEnabled(mcpServer) {
-			contextMap := map[string]any{
-				"mcpServer": mcpServer.Name,
-				"namespace": mcpServer.Namespace,
-			}
-			err := newOperatorError("analytics.enabled requires gateway.enabled", contextMap)
-			r.updateStatus(ctx, mcpServer, "Error", err.Error(), resourceReadiness{})
-			logOperatorError(logger, err, "Analytics requires gateway")
-			return err
-		}
 		if err := r.requireSpecField(ctx, mcpServer, logger, "analytics ingest URL", mcpServer.Spec.Analytics.IngestURL,
 			"analytics.ingestURL is required when analytics.enabled is true"); err != nil {
 			return err
 		}
-		if ref := mcpServer.Spec.Analytics.APIKeySecretRef; ref != nil && (strings.TrimSpace(ref.Name) == "" || strings.TrimSpace(ref.Key) == "") {
-			contextMap := map[string]any{
-				"mcpServer": mcpServer.Name,
-				"namespace": mcpServer.Namespace,
-			}
-			err := newOperatorError("analytics.apiKeySecretRef requires both name and key", contextMap)
-			r.updateStatus(ctx, mcpServer, "Error", err.Error(), resourceReadiness{})
-			logOperatorError(logger, err, "Invalid analytics secret reference")
-			return err
-		}
-	}
-
-	return nil
-}
-
-func (r *MCPServerReconciler) validateRolloutValue(ctx context.Context, mcpServer *mcpv1alpha1.MCPServer, logger logr.Logger, fieldName, value string) error {
-	trimmed := strings.TrimSpace(value)
-	if trimmed == "" {
-		return nil
-	}
-
-	numeric := strings.TrimSuffix(trimmed, "%")
-	if numeric == "" {
-		contextMap := map[string]any{
-			"mcpServer": mcpServer.Name,
-			"namespace": mcpServer.Namespace,
-			"field":     fieldName,
-			"value":     trimmed,
-		}
-		err := newOperatorError(fieldName+" must be an integer or percentage", contextMap)
-		r.updateStatus(ctx, mcpServer, "Error", err.Error(), resourceReadiness{})
-		logOperatorError(logger, err, "Invalid rollout value")
-		return err
-	}
-
-	parsed, err := strconv.Atoi(numeric)
-	if err != nil || parsed < 0 {
-		contextMap := map[string]any{
-			"mcpServer": mcpServer.Name,
-			"namespace": mcpServer.Namespace,
-			"field":     fieldName,
-			"value":     trimmed,
-		}
-		validationErr := newOperatorError(fieldName+" must be an integer or percentage", contextMap)
-		r.updateStatus(ctx, mcpServer, "Error", validationErr.Error(), resourceReadiness{})
-		logOperatorError(logger, validationErr, "Invalid rollout value")
-		return validationErr
 	}
 
 	return nil
@@ -460,121 +314,15 @@ func determinePhase(readiness resourceReadiness) (string, bool) {
 }
 
 func (r *MCPServerReconciler) setDefaults(mcpServer *mcpv1alpha1.MCPServer) {
-	// Only set a default tag if the image doesn't already contain one.
-	if mcpServer.Spec.ImageTag == "" && !strings.Contains(mcpServer.Spec.Image, ":") && !strings.Contains(mcpServer.Spec.Image, "@") {
-		mcpServer.Spec.ImageTag = "latest"
+	mcpServer.Default()
+
+	if strings.TrimSpace(mcpServer.Spec.IngressHost) == "" && strings.TrimSpace(mcpServer.Spec.PublicPathPrefix) == "" {
+		mcpServer.Spec.IngressHost = strings.TrimSpace(r.DefaultIngressHost)
 	}
-	if mcpServer.Spec.Replicas == nil {
-		replicas := int32(1)
-		mcpServer.Spec.Replicas = &replicas
-	}
-	if mcpServer.Spec.Port == 0 {
-		mcpServer.Spec.Port = DefaultPort
-	}
-	if mcpServer.Spec.ServicePort == 0 {
-		mcpServer.Spec.ServicePort = 80
-	}
-	if mcpServer.Spec.IngressPath == "" && mcpServer.Name != "" {
-		mcpServer.Spec.IngressPath = "/" + mcpServer.Name + "/mcp"
-	}
-	if strings.TrimSpace(mcpServer.Spec.PublicPathPrefix) == "" && mcpServer.Name != "" {
-		mcpServer.Spec.PublicPathPrefix = mcpServer.Name
-	}
-	if mcpServer.Spec.IngressClass == "" {
-		mcpServer.Spec.IngressClass = "traefik"
-	}
-	if gatewayEnabled(mcpServer) {
-		if mcpServer.Spec.Auth == nil {
-			mcpServer.Spec.Auth = &mcpv1alpha1.AuthConfig{}
-		}
-		if mcpServer.Spec.Policy == nil {
-			mcpServer.Spec.Policy = &mcpv1alpha1.PolicyConfig{}
-		}
-		if mcpServer.Spec.Session == nil {
-			mcpServer.Spec.Session = &mcpv1alpha1.SessionConfig{}
-		}
-	}
-	if mcpServer.Spec.Auth != nil {
-		if mcpServer.Spec.Auth.Mode == "" {
-			mcpServer.Spec.Auth.Mode = mcpv1alpha1.AuthModeHeader
-		}
-		if mcpServer.Spec.Auth.HumanIDHeader == "" {
-			mcpServer.Spec.Auth.HumanIDHeader = "X-MCP-Human-ID"
-		}
-		if mcpServer.Spec.Auth.AgentIDHeader == "" {
-			mcpServer.Spec.Auth.AgentIDHeader = "X-MCP-Agent-ID"
-		}
-		if mcpServer.Spec.Auth.SessionIDHeader == "" {
-			mcpServer.Spec.Auth.SessionIDHeader = "X-MCP-Agent-Session"
-		}
-		if mcpServer.Spec.Auth.TokenHeader == "" {
-			mcpServer.Spec.Auth.TokenHeader = "Authorization"
-		}
-	}
-	if mcpServer.Spec.Policy != nil {
-		if mcpServer.Spec.Policy.Mode == "" {
-			mcpServer.Spec.Policy.Mode = mcpv1alpha1.PolicyModeAllowList
-		}
-		if mcpServer.Spec.Policy.DefaultDecision == "" {
-			mcpServer.Spec.Policy.DefaultDecision = mcpv1alpha1.PolicyDecisionDeny
-		}
-		if mcpServer.Spec.Policy.EnforceOn == "" {
-			mcpServer.Spec.Policy.EnforceOn = "call_tool"
-		}
-		if mcpServer.Spec.Policy.PolicyVersion == "" {
-			mcpServer.Spec.Policy.PolicyVersion = "v1"
-		}
-	}
-	if mcpServer.Spec.Session != nil {
-		if mcpServer.Spec.Session.Store == "" {
-			mcpServer.Spec.Session.Store = "kubernetes"
-		}
-		if mcpServer.Spec.Session.HeaderName == "" {
-			mcpServer.Spec.Session.HeaderName = "X-MCP-Agent-Session"
-		}
-		if mcpServer.Spec.Session.MaxLifetime == "" {
-			mcpServer.Spec.Session.MaxLifetime = "24h"
-		}
-		if mcpServer.Spec.Session.IdleTimeout == "" {
-			mcpServer.Spec.Session.IdleTimeout = "1h"
-		}
-		if mcpServer.Spec.Session.UpstreamTokenHeader == "" {
-			mcpServer.Spec.Session.UpstreamTokenHeader = "Authorization"
-		}
-	}
-	for i := range mcpServer.Spec.Tools {
-		if mcpServer.Spec.Tools[i].RequiredTrust == "" {
-			mcpServer.Spec.Tools[i].RequiredTrust = mcpv1alpha1.TrustLevelLow
-		}
-	}
-	if gatewayEnabled(mcpServer) {
-		if mcpServer.Spec.Gateway.Port == 0 {
-			mcpServer.Spec.Gateway.Port = defaultGatewayPort
-		}
-		if mcpServer.Spec.Gateway.UpstreamURL == "" {
-			mcpServer.Spec.Gateway.UpstreamURL = fmt.Sprintf("http://127.0.0.1:%d", mcpServer.Spec.Port)
-		}
-	}
+
 	if analyticsEnabled(mcpServer) {
-		if mcpServer.Spec.Analytics.IngestURL == "" && r.DefaultAnalyticsIngestURL != "" {
-			mcpServer.Spec.Analytics.IngestURL = r.DefaultAnalyticsIngestURL
-		}
-		if mcpServer.Spec.Analytics.Source == "" && mcpServer.Name != "" {
-			mcpServer.Spec.Analytics.Source = mcpServer.Name
-		}
-		if mcpServer.Spec.Analytics.EventType == "" {
-			mcpServer.Spec.Analytics.EventType = "mcp.request"
-		}
-	}
-	if mcpServer.Spec.Rollout != nil {
-		if mcpServer.Spec.Rollout.Strategy == "" {
-			mcpServer.Spec.Rollout.Strategy = mcpv1alpha1.RolloutStrategyRollingUpdate
-		}
-		if mcpServer.Spec.Rollout.MaxUnavailable == "" {
-			mcpServer.Spec.Rollout.MaxUnavailable = "25%"
-		}
-		if mcpServer.Spec.Rollout.MaxSurge == "" {
-			mcpServer.Spec.Rollout.MaxSurge = "25%"
+		if strings.TrimSpace(mcpServer.Spec.Analytics.IngestURL) == "" {
+			mcpServer.Spec.Analytics.IngestURL = strings.TrimSpace(r.DefaultAnalyticsIngestURL)
 		}
 	}
 }

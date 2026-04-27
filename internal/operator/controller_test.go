@@ -170,9 +170,10 @@ func TestValidateGatewayConfigRejectsInvalidRolloutValues(t *testing.T) {
 			Namespace: "default",
 		},
 		Spec: mcpv1alpha1.MCPServerSpec{
-			Image:    "example.com/server",
-			Replicas: &replicas,
-			Port:     DefaultPort,
+			Image:            "example.com/server",
+			Replicas:         &replicas,
+			Port:             DefaultPort,
+			PublicPathPrefix: "gateway-server",
 			Gateway: &mcpv1alpha1.GatewayConfig{
 				Enabled: true,
 				Port:    defaultGatewayPort,
@@ -215,8 +216,9 @@ func TestValidateGatewayConfigRequiresOAuthIssuer(t *testing.T) {
 			Namespace: "default",
 		},
 		Spec: mcpv1alpha1.MCPServerSpec{
-			Image: "example.com/server",
-			Port:  DefaultPort,
+			Image:            "example.com/server",
+			Port:             DefaultPort,
+			PublicPathPrefix: "gateway-server",
 			Gateway: &mcpv1alpha1.GatewayConfig{
 				Enabled: true,
 				Port:    defaultGatewayPort,
@@ -277,7 +279,7 @@ func TestSetDefaults(t *testing.T) {
 		}
 		r.setDefaults(&mcpServer)
 		assertEqual(t, "publicPathPrefix", mcpServer.Spec.PublicPathPrefix, "test-server")
-		assertEqual(t, "ingressHost", mcpServer.Spec.IngressHost, "")
+		assertEqual(t, "ingressHost", mcpServer.Spec.IngressHost, "example.com")
 	})
 
 	t.Run("preserves explicit publicPathPrefix", func(t *testing.T) {
