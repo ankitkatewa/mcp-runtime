@@ -166,9 +166,34 @@ controller from the public internet. For enterprise PKI, install the
 ```
 
 If you retain the bundled registry with TLS, make sure the registry certificate
-covers the registry hostname nodes and build machines use. If you use an
-external registry, the registry's own TLS and auth configuration are outside
-the bundled cert-manager flow.
+covers the registry and MCP hostnames nodes, build machines, and MCP clients
+use. The `registry/registry-cert` Certificate writes the `registry/registry-tls`
+Secret and covers `registry.<domain>` plus `mcp.<domain>` when those names are
+derived from `MCP_PLATFORM_DOMAIN` or explicit ingress host environment
+variables.
+
+The platform UI hostname is separate. `platform.<domain>` is owned by the
+`mcp-sentinel-platform-ui` Ingress in the `mcp-sentinel` namespace, and
+cert-manager writes that certificate into the `mcp-sentinel-platform-tls`
+Secret in the same namespace. Do not expect `registry-cert` to contain
+`platform.<domain>`.
+
+Inspect both TLS paths when debugging:
+
+```bash
+kubectl get certificate registry-cert -n registry -o yaml
+kubectl get secret registry-tls -n registry \
+  -o jsonpath='{.data.tls\.crt}' | base64 -d | \
+  openssl x509 -noout -text | grep -A1 "Subject Alternative Name"
+
+kubectl get ingress mcp-sentinel-platform-ui -n mcp-sentinel -o yaml
+kubectl get secret mcp-sentinel-platform-tls -n mcp-sentinel \
+  -o jsonpath='{.data.tls\.crt}' | base64 -d | \
+  openssl x509 -noout -text | grep -A1 "Subject Alternative Name"
+```
+
+If you use an external registry, the registry's own TLS and auth configuration
+are outside the bundled cert-manager flow.
 
 ## Node pool consistency
 

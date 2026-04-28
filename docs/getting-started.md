@@ -29,13 +29,28 @@ make build
 
 This produces `./bin/mcp-runtime`.
 
-## 2. Preflight (optional but recommended)
+## 2. Confirm cluster readiness
 
 ```bash
 ./bin/mcp-runtime bootstrap
+./bin/mcp-runtime cluster doctor
 ```
 
-Validates: kubectl connectivity, CoreDNS, default `StorageClass`, Traefik `IngressClass`, MetalLB namespace. Warnings only — fix gaps with your platform tooling, or `bootstrap --apply --provider k3s` to install bundled CoreDNS / local-path on k3s.
+Before setup, confirm the target Kubernetes cluster is ready for registry
+pushes, image pulls, ingress, storage, and TLS. See
+[cluster-readiness.md](cluster-readiness.md) for distribution-specific
+preparation.
+
+`setup` installs MCP Runtime resources into an already-running cluster. It does
+not configure node DNS, containerd or Docker registry trust, public DNS, TLS
+issuers, image pull credentials, or storage classes. Fix those prerequisites
+with your platform tooling before continuing.
+
+`bootstrap` validates kubectl connectivity, CoreDNS, the default
+`StorageClass`, Traefik `IngressClass`, and MetalLB namespace. Warnings only —
+fix gaps with your platform tooling, or `bootstrap --apply --provider k3s` to
+install bundled CoreDNS / local-path on k3s. `cluster doctor` adds
+distribution-specific registry and node readiness checks.
 
 ## 3. Install the platform stack
 
