@@ -139,6 +139,18 @@ jobs:
           go-version-file: go.mod
           cache: true
 
+      - name: Free runner disk space
+        run: |
+          df -h
+          sudo rm -rf \
+            /opt/ghc \
+            /opt/hostedtoolcache/CodeQL \
+            /usr/local/lib/android \
+            /usr/local/share/boost \
+            /usr/share/dotnet
+          docker system prune -af --volumes || true
+          df -h
+
       - name: Validate E2E scenario selectors
         run: bash test/e2e/scenarios_test.sh
 
