@@ -1672,6 +1672,7 @@ build_and_publish_image "docker.io/library/mcp-sentinel-ui:latest" "${SENTINEL_R
 
 echo "[setup] running platform setup in test mode"
 export MCP_SETUP_WAIT_TIMEOUT="${MCP_SETUP_WAIT_TIMEOUT:-900}"
+export MCP_DEPLOYMENT_TIMEOUT="${MCP_DEPLOYMENT_TIMEOUT:-900s}"
 export MCP_REGISTRY_ENDPOINT="${MCP_REGISTRY_ENDPOINT:-registry.registry.svc.cluster.local:5000}"
 MCP_RUNTIME_REGISTRY_IMAGE_OVERRIDE="${TEST_MODE_REGISTRY_IMAGE}" \
 ./bin/mcp-runtime setup --test-mode --ingress-manifest config/ingress/overlays/http

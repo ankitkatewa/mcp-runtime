@@ -1130,10 +1130,11 @@ type imagePullPodCandidate struct {
 	Name      string
 	Images    []string
 	Reasons   []string
+	Messages  []string
 }
 
 func checkRegistryHTTPPullMismatch(kubectl KubectlRunner) DoctorCheck {
-	out, err := readKubectlOutput(kubectl, []string{"get", "pods", "-A", "-o", `jsonpath={range .items[*]}{.metadata.namespace}{"|"}{.metadata.name}{"|"}{range .spec.containers[*]}{.image}{","}{end}{"|"}{range .status.containerStatuses[*]}{.state.waiting.reason}{","}{end}{"\n"}{end}`})
+	out, err := readKubectlOutput(kubectl, []string{"get", "pods", "-A", "-o", `jsonpath={range .items[*]}{.metadata.namespace}{"|"}{.metadata.name}{"|"}{range .spec.initContainers[*]}{.image}{","}{end}{range .spec.containers[*]}{.image}{","}{end}{"|"}{range .status.initContainerStatuses[*]}{.state.waiting.reason}{","}{end}{range .status.containerStatuses[*]}{.state.waiting.reason}{","}{end}{"|"}{range .status.initContainerStatuses[*]}{.state.waiting.message}{","}{end}{range .status.containerStatuses[*]}{.state.waiting.message}{","}{end}{"\n"}{end}`})
 	if err != nil {
 		return DoctorCheck{
 			Name:   "registry HTTP pull mismatch",
@@ -1152,9 +1153,24 @@ func checkRegistryHTTPPullMismatch(kubectl KubectlRunner) DoctorCheck {
 		}
 	}
 
+	describeFailures := 0
+	var firstDescribeFailure string
 	for _, candidate := range candidates {
+		if strings.Contains(strings.Join(candidate.Messages, " "), registryHTTPPullMismatch) {
+			return DoctorCheck{
+				Name:   "registry HTTP pull mismatch",
+				OK:     false,
+				Detail: fmt.Sprintf("pod %s/%s image %s failed pull: %s", candidate.Namespace, candidate.Name, firstNonEmpty(candidate.Images, "unknown"), registryHTTPPullMismatch),
+				Remedy: "Registry HTTP pull mismatch: kubelet tried HTTPS against the HTTP registry. Configure the node/containerd insecure registry or Kind mirror for the exact image host, or use TLS.",
+			}
+		}
+
 		describe, err := readKubectlOutput(kubectl, []string{"describe", "pod", candidate.Name, "-n", candidate.Namespace})
 		if err != nil {
+			describeFailures++
+			if firstDescribeFailure == "" {
+				firstDescribeFailure = fmt.Sprintf("%s/%s: %v", candidate.Namespace, candidate.Name, err)
+			}
 			continue
 		}
 		if !strings.Contains(describe, registryHTTPPullMismatch) {
@@ -1165,6 +1181,14 @@ func checkRegistryHTTPPullMismatch(kubectl KubectlRunner) DoctorCheck {
 			OK:     false,
 			Detail: fmt.Sprintf("pod %s/%s image %s failed pull: %s", candidate.Namespace, candidate.Name, firstNonEmpty(candidate.Images, "unknown"), registryHTTPPullMismatch),
 			Remedy: "Registry HTTP pull mismatch: kubelet tried HTTPS against the HTTP registry. Configure the node/containerd insecure registry or Kind mirror for the exact image host, or use TLS.",
+		}
+	}
+	if describeFailures > 0 {
+		return DoctorCheck{
+			Name:   "registry HTTP pull mismatch",
+			OK:     false,
+			Detail: fmt.Sprintf("pod inspection failed for %d/%d ErrImagePull/ImagePullBackOff candidate(s); first error: %s", describeFailures, len(candidates), firstDescribeFailure),
+			Remedy: "inspect pull-failing pods manually with `kubectl describe pod <name> -n <namespace>` and check kubectl RBAC/connectivity",
 		}
 	}
 
@@ -1178,12 +1202,16 @@ func checkRegistryHTTPPullMismatch(kubectl KubectlRunner) DoctorCheck {
 func parseImagePullCandidates(value string) []imagePullPodCandidate {
 	var candidates []imagePullPodCandidate
 	for _, line := range filterNonEmptyLines(value) {
-		parts := strings.SplitN(line, "|", 4)
-		if len(parts) != 4 {
+		parts := strings.SplitN(line, "|", 5)
+		if len(parts) < 4 {
 			continue
 		}
 		reasons := splitCommaTrim(parts[3])
-		if !hasImagePullReason(reasons) {
+		messages := []string{}
+		if len(parts) == 5 {
+			messages = splitCommaTrim(parts[4])
+		}
+		if !hasImagePullReason(reasons) && !hasRegistryHTTPPullMismatchMessage(messages) {
 			continue
 		}
 		candidates = append(candidates, imagePullPodCandidate{
@@ -1191,6 +1219,7 @@ func parseImagePullCandidates(value string) []imagePullPodCandidate {
 			Name:      strings.TrimSpace(parts[1]),
 			Images:    splitCommaTrim(parts[2]),
 			Reasons:   reasons,
+			Messages:  messages,
 		})
 	}
 	return candidates
@@ -1199,7 +1228,16 @@ func parseImagePullCandidates(value string) []imagePullPodCandidate {
 func hasImagePullReason(reasons []string) bool {
 	for _, reason := range reasons {
 		switch strings.TrimSpace(reason) {
-		case "ErrImagePull", "ImagePullBackOff":
+		case "ErrImagePull", "ImagePullBackOff", "Init:ErrImagePull", "Init:ImagePullBackOff":
+			return true
+		}
+	}
+	return false
+}
+
+func hasRegistryHTTPPullMismatchMessage(messages []string) bool {
+	for _, message := range messages {
+		if strings.Contains(message, registryHTTPPullMismatch) {
 			return true
 		}
 	}

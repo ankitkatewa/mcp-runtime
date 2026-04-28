@@ -307,11 +307,12 @@ func TestParseImagePullCandidates(t *testing.T) {
 		"mcp-sentinel|mcp-sentinel-api-abc|10.96.64.95:5000/mcp-sentinel-api:latest,|ImagePullBackOff,",
 		"mcp-runtime|operator-abc|registry.registry.svc.cluster.local:5000/mcp-runtime-operator:latest,|Running,",
 		"registry|registry-abc|registry.local/distribution:latest,|ErrImagePull,",
+		"mcp-servers|demo-init-abc|registry.local/bootstrap:latest,registry.local/demo:latest,|ImagePullBackOff,",
 	}, "\n")
 
 	candidates := parseImagePullCandidates(out)
-	if len(candidates) != 2 {
-		t.Fatalf("expected 2 image pull candidates, got %d", len(candidates))
+	if len(candidates) != 3 {
+		t.Fatalf("expected 3 image pull candidates, got %d", len(candidates))
 	}
 	if candidates[0].Namespace != "mcp-sentinel" || candidates[0].Name != "mcp-sentinel-api-abc" {
 		t.Fatalf("unexpected first candidate: %#v", candidates[0])
@@ -321,6 +322,9 @@ func TestParseImagePullCandidates(t *testing.T) {
 	}
 	if candidates[1].Images[0] != "registry.local/distribution:latest" {
 		t.Fatalf("expected host registry image, got %q", candidates[1].Images[0])
+	}
+	if candidates[2].Images[0] != "registry.local/bootstrap:latest" || candidates[2].Reasons[0] != "ImagePullBackOff" {
+		t.Fatalf("expected init-container pull candidate, got %#v", candidates[2])
 	}
 }
 
@@ -363,6 +367,64 @@ Events:
 		}
 	})
 
+	t.Run("reports HTTP registry mismatch from init container pull events", func(t *testing.T) {
+		pods := "mcp-servers|demo-init-abc|registry.local/bootstrap:latest,registry.local/demo:latest,|Init:ImagePullBackOff,\n"
+		describe := `Name:             demo-init-abc
+Namespace:        mcp-servers
+Init Containers:
+  bootstrap:
+    Image:          registry.local/bootstrap:latest
+Events:
+  Type     Reason     Age   From               Message
+  ----     ------     ----  ----               -------
+  Warning  Failed     31s   kubelet            Failed to pull image "registry.local/bootstrap:latest": failed to do request: Head "https://registry.local/v2/bootstrap/manifests/latest": http: server gave HTTP response to HTTPS client
+`
+		mock := &MockExecutor{
+			CommandFunc: func(spec ExecSpec) *MockCommand {
+				switch {
+				case contains(spec.Args, "pods") && contains(spec.Args, "-A"):
+					return &MockCommand{OutputData: []byte(pods)}
+				case contains(spec.Args, "describe"):
+					return &MockCommand{OutputData: []byte(describe)}
+				default:
+					return &MockCommand{}
+				}
+			},
+		}
+		kubectl := &KubectlClient{exec: mock, validators: nil}
+		check := checkRegistryHTTPPullMismatch(kubectl)
+		if check.OK {
+			t.Fatal("expected registry HTTP mismatch for init container to fail")
+		}
+		for _, want := range []string{"mcp-servers/demo-init-abc", "registry.local/bootstrap:latest", registryHTTPPullMismatch} {
+			if !strings.Contains(check.Detail, want) {
+				t.Fatalf("detail should contain %q, got %q", want, check.Detail)
+			}
+		}
+	})
+
+	t.Run("reports HTTP registry mismatch from waiting status message", func(t *testing.T) {
+		pods := `mcp-servers|demo-status-abc|registry.local/bootstrap:latest,registry.local/demo:latest,||failed to pull image "registry.local/bootstrap:latest": failed to do request: Head "https://registry.local/v2/bootstrap/manifests/latest": http: server gave HTTP response to HTTPS client,`
+		mock := &MockExecutor{
+			CommandFunc: func(spec ExecSpec) *MockCommand {
+				if contains(spec.Args, "describe") {
+					t.Fatalf("did not expect describe call when waiting status message has mismatch")
+				}
+				return &MockCommand{OutputData: []byte(pods)}
+			},
+		}
+		kubectl := &KubectlClient{exec: mock, validators: nil}
+		check := checkRegistryHTTPPullMismatch(kubectl)
+		if check.OK {
+			t.Fatal("expected registry HTTP mismatch from status message to fail")
+		}
+		for _, want := range []string{"mcp-servers/demo-status-abc", "registry.local/bootstrap:latest", registryHTTPPullMismatch} {
+			if !strings.Contains(check.Detail, want) {
+				t.Fatalf("detail should contain %q, got %q", want, check.Detail)
+			}
+		}
+	})
+
 	t.Run("passes when pull failures do not include HTTP mismatch event", func(t *testing.T) {
 		pods := "mcp-servers|demo-abc|registry.local/demo:latest,|ErrImagePull,\n"
 		describe := `Events:
@@ -380,6 +442,34 @@ Events:
 		check := checkRegistryHTTPPullMismatch(kubectl)
 		if !check.OK {
 			t.Fatalf("expected OK when no HTTP mismatch event exists, got detail=%q", check.Detail)
+		}
+	})
+
+	t.Run("fails when pod inspection fails for pull candidates", func(t *testing.T) {
+		pods := strings.Join([]string{
+			"mcp-servers|demo-a|registry.local/demo-a:latest,|ErrImagePull,",
+			"mcp-servers|demo-b|registry.local/demo-b:latest,|ImagePullBackOff,",
+		}, "\n")
+		mock := &MockExecutor{
+			CommandFunc: func(spec ExecSpec) *MockCommand {
+				if contains(spec.Args, "describe") {
+					return &MockCommand{OutputErr: errors.New("pods is forbidden")}
+				}
+				return &MockCommand{OutputData: []byte(pods)}
+			},
+		}
+		kubectl := &KubectlClient{exec: mock, validators: nil}
+		check := checkRegistryHTTPPullMismatch(kubectl)
+		if check.OK {
+			t.Fatal("expected registry HTTP mismatch check to fail when pod inspection fails")
+		}
+		for _, want := range []string{"pod inspection failed", "2/2", "mcp-servers/demo-a", "pods is forbidden"} {
+			if !strings.Contains(check.Detail, want) {
+				t.Fatalf("detail should contain %q, got %q", want, check.Detail)
+			}
+		}
+		if !strings.Contains(check.Remedy, "kubectl describe pod") {
+			t.Fatalf("remedy should mention manual describe, got %q", check.Remedy)
 		}
 	})
 }
