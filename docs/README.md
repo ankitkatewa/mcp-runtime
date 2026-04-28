@@ -83,6 +83,12 @@ MCP Runtime is an open source, Kubernetes-native control plane for deploying, go
   <strong>API and CRDs</strong>
   <span><code>MCPServer</code>, access grants, sessions, gateway headers, and HTTP APIs.</span>
 </a>
+
+<a class="docs-card" href="internals/README/">
+  <span class="docs-card-kicker">Contribute</span>
+  <strong>Read the internals</strong>
+  <span>If you are here to contribute, start with the internal docs for codebase structure, package tours, and implementation details.</span>
+</a>
 </div>
 
 ## Common workflows

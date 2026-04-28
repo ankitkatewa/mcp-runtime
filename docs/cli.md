@@ -34,6 +34,14 @@ make build
 
 For a new workstation, run `make deps-install` first where supported, then `STRICT_DEPS_CHECK=1 make deps-check`. Required host tools are Go `1.25+`, Make, Docker with a reachable daemon, `kubectl` configured for the cluster, plus `curl`, `jq`, and `python3` for documented dev flows. `kind` is required only for local Kind clusters.
 
+Use the built-in help for the exact description, flags, and defaults of any command:
+
+```bash
+mcp-runtime --help
+mcp-runtime <group> --help
+mcp-runtime <group> <subcommand> --help
+```
+
 ## Command map
 
 | Group | What it covers | Important subcommands |
@@ -50,7 +58,7 @@ For a new workstation, run `make deps-install` first where supported, then `STRI
 | `status` | Aggregated platform health (cluster, registry, operator, servers, sentinel). | `status` |
 | `completion` | Generate shell completion (bash, zsh, fish). | `completion bash\|zsh\|fish` |
 
-Every command inherits `--debug` (structured error logging) and `--version`.
+The root command exposes `--debug` and `--version`. Subcommands inherit `--debug`; use `mcp-runtime --version` at the top level.
 
 ## bootstrap
 

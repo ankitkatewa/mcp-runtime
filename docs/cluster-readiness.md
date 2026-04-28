@@ -195,6 +195,19 @@ kubectl get secret mcp-sentinel-platform-tls -n mcp-sentinel \
 If you use an external registry, the registry's own TLS and auth configuration
 are outside the bundled cert-manager flow.
 
+Quick public endpoint checks after DNS and TLS are live:
+
+- `curl -k -I https://registry.<domain>/v2/` should return `200` and
+  `docker-distribution-api-version: registry/2.0`.
+- `curl -k -I https://platform.<domain>/` should return `200`.
+- `curl -k -i https://platform.<domain>/api/health` should normally return
+  `401` without platform credentials; that still proves the platform host is
+  routing API traffic correctly.
+- `curl -k -i https://mcp.<domain>/<server-name>/mcp` may return an
+  application-level `400` or `401` when called without the expected MCP
+  protocol headers or session context. That is often enough to confirm the
+  public route is live before you move on to MCP client debugging.
+
 ## Node pool consistency
 
 Registry fixes must apply to every node pool that can schedule MCP Runtime

@@ -38,7 +38,7 @@ flowchart LR
 | Group | Fields |
 |---|---|
 | **Workload + routing** | `image`, `imageTag`, `registryOverride`, `replicas`, `port`, `servicePort`, `publicPathPrefix`, `ingressPath`, `ingressHost`, `ingressClass`, `ingressAnnotations` |
-| **Resources + env** | CPU/memory `requests`/`limits`, literal `env`, secret-backed `envFromSecret`, `imagePullSecrets` |
+| **Resources + env** | CPU/memory `requests`/`limits`, literal `envVars`, secret-backed `secretEnvVars`, `imagePullSecrets` |
 | **Identity + policy** | `tools[]`, `auth`, `policy`, `session`, `gateway` |
 | **Delivery** | `analytics`, `rollout`, `useProvisionedRegistry` |
 | **Advanced knobs** | `gateway.stripPrefix`, `session.upstreamTokenHeader`, `analytics.apiKeySecretRef`, `rollout.maxUnavailable`, `rollout.maxSurge` |
@@ -223,8 +223,10 @@ For `POST /api/runtime/grants` and `POST /api/runtime/sessions`, the API resolve
 ```text
 GET  /api/runtime/servers              # List MCP server deployments
 GET  /api/runtime/grants               # List MCPAccessGrant resources
+GET  /api/runtime/grants/{ns}/{name}   # Get one MCPAccessGrant
 POST /api/runtime/grants               # Create or update an MCPAccessGrant (x-api-key)
 GET  /api/runtime/sessions             # List MCPAgentSession resources
+GET  /api/runtime/sessions/{ns}/{name} # Get one MCPAgentSession
 POST /api/runtime/sessions             # Create or update an MCPAgentSession (x-api-key)
 GET  /api/runtime/components           # Sentinel component health status
 GET  /api/runtime/policy?namespace=&server=   # Get rendered policy for a server
@@ -278,6 +280,20 @@ POST /api/runtime/actions/restart     # Body: {component: "api"} or {all: true}
 | **Grant Toggle** | Enable / disable an `MCPAccessGrant` without deleting it. Disabled grants deny access at the gateway. |
 | **Session Revoke** | Revoke / unrevoke an `MCPAgentSession`. Revoked sessions cannot be used for tool calls. |
 | **Component Restart** | Rolling restart of Sentinel components (`api`, `ingest`, `processor`, `gateway`, `ui`) or all. |
+
+## Platform Admin and User API
+
+Additional authenticated routes exposed by the API service:
+
+```text
+GET  /api/deployments                  # User-scoped deployment list
+GET  /api/deployments/{namespace}/{name}
+GET  /api/admin/namespaces             # Admin-only namespace inventory
+GET  /api/admin/deployments            # Admin-only deployment inventory
+GET  /api/user/api-keys                # List caller-owned API keys
+POST /api/user/api-keys                # Create caller-owned API key
+POST /api/user/api-keys/{id}/revoke    # Revoke caller-owned API key
+```
 
 ## Analytics API
 

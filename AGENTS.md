@@ -49,6 +49,16 @@ Optional but used in CI: `staticcheck ./...` (install: `go install honnef.co/go/
 
 **CI** (`.github/workflows/ci.yaml`) runs: `gofmt` check, `go vet`, `staticcheck`, unit tests, golden tests, service tests, `test/integration`, then Kind e2e on `main`/`PR` branches. Align local changes with that before opening a PR.
 
+**Docs sync for CLI help:** when you edit `docs/cli.md`, `docs/getting-started.md`, `docs/publish-mcp-server.md`, or any page that shows CLI commands, verify the exact command description, subcommands, flags, and defaults from live help output before push. Use:
+
+```bash
+./bin/mcp-runtime --help
+./bin/mcp-runtime <group> --help
+./bin/mcp-runtime <group> <subcommand> --help
+```
+
+Do not hand-wave command behavior from memory when the docs are meant to reflect Cobra help text. Agents should copy the real wording or update prose/examples to match the live help output for the commands they touched.
+
 ## Conventions for code changes
 
 - **Scope:** Change only what the task needs; do not “clean up” unrelated files. Match naming and patterns in the nearest similar code.
