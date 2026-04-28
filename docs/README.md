@@ -39,11 +39,6 @@ integration, ingress wiring, and the bundled Sentinel stack. Sentinel includes
 the gateway request path, grant/session policy materialization, analytics
 ingest and processing, dashboard/API services, and observability components.
 
-For local and CI validation, `setup --test-mode` relaxes production guardrails
-but still builds and pushes runtime images. It publishes the operator, gateway
-proxy, and Sentinel service images with `latest` tags to the configured or
-bundled registry, then deploys pods that pull those images.
-
 ## Governance, audit, and compliance
 
 MCP Runtime keeps governance on the live request path instead of leaving it as
@@ -59,20 +54,14 @@ for governed agent workflows.
 
 ## Before setup
 
-MCP Runtime expects an already-running Kubernetes cluster. The CLI can apply
-runtime manifests, but it does not configure the node container runtime or host
-DNS. If you use the bundled plain HTTP registry, every node that may schedule
-MCP Runtime pods must trust the exact image host and port used in pod specs.
-On k3s, that usually means an `/etc/rancher/k3s/registries.yaml` mirror for
-`registry.local`, `registry.registry.svc.cluster.local:5000`, or the registry
-Service `ClusterIP:port` such as `10.43.x.x:5000`. On k3s hosts where
-`~/.kube/config` is empty or minimal, pass
-`--kubeconfig /etc/rancher/k3s/k3s.yaml`.
+MCP Runtime expects an already-running Kubernetes cluster and a workstation with
+the CLI prerequisites installed. The setup flow applies the runtime manifests,
+installs the operator and Sentinel services, and wires ingress and registry
+resources for the selected environment.
 
-With the bundled registry, setup prints the selected pull host as the registry
-`Internal URL` after the registry Service exists. If that value was not already
-trusted by k3s/containerd, add it to `registries.yaml`, restart k3s, and rerun
-setup.
+For provider-specific prerequisites such as container runtime registry trust,
+DNS, ingress, TLS, and k3s configuration, start with
+[Cluster readiness](cluster-readiness.md).
 
 ## Choose a path
 
