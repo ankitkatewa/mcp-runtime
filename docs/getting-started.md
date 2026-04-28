@@ -325,6 +325,18 @@ Common variants:
 ./bin/mcp-runtime setup --test-mode           # local Kind/dev build+push path
 ```
 
+### Local development notes
+
+For Kind or other local setups where traffic reaches Traefik through `kubectl port-forward` or a NodePort but the ingress controller does not publish `Ingress.status.loadBalancer.ingress[]`, run setup with permissive ingress readiness:
+
+```bash
+export MCP_INGRESS_READINESS_MODE=permissive
+./bin/mcp-runtime setup --test-mode --ingress-manifest config/ingress/overlays/http
+kubectl port-forward -n traefik svc/traefik 18080:8000
+```
+
+Then use `http://127.0.0.1:18080/<publicPathPrefix>/mcp` for local MCP traffic. Keep the default strict readiness mode for production clusters that rely on published load-balancer status.
+
 ## 5. Confirm health
 
 ```bash

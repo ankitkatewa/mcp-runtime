@@ -68,6 +68,7 @@ For every `MCPServer`, the operator reconciles:
 - `message` — human-readable progress.
 - `conditions` — standard Kubernetes condition slice.
 - Per-resource readiness booleans: `deploymentReady`, `serviceReady`, `ingressReady`, `gatewayReady`, `policyReady`.
+- `ingressReady` defaults to strict mode: the Ingress must publish `status.loadBalancer.ingress[]`. Set operator env `MCP_INGRESS_READINESS_MODE=permissive` for dev or NodePort-style ingress controllers that route traffic without publishing load-balancer status; permissive mode treats an Ingress with rules as ready.
 
 ### Useful defaults
 

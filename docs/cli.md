@@ -91,6 +91,8 @@ configured or bundled registry. With the bundled plain HTTP registry, cluster
 nodes still need containerd/Docker trust for the exact image host they pull
 from.
 
+For local development where ingress traffic is exposed through port-forward or NodePort and the ingress controller does not publish load-balancer status, set `MCP_INGRESS_READINESS_MODE=permissive` before `setup`. The default is strict and waits for `Ingress.status.loadBalancer.ingress[]`.
+
 ## auth
 
 Use `auth` for platform API credentials, not for Kubernetes cluster access.

@@ -1044,6 +1044,49 @@ func TestCheckIngressReady(t *testing.T) {
 		}
 		assertEqual(t, "ready", ready, false)
 	})
+
+	t.Run("uses configured readiness mode when ingress has rules without load balancer status", func(t *testing.T) {
+		pathType := networkingv1.PathTypePrefix
+		mcpServer := &mcpv1alpha1.MCPServer{
+			ObjectMeta: metav1.ObjectMeta{Name: "test-server", Namespace: "default"},
+		}
+		ingress := &networkingv1.Ingress{
+			ObjectMeta: metav1.ObjectMeta{Name: "test-server", Namespace: "default"},
+			Spec: networkingv1.IngressSpec{
+				Rules: []networkingv1.IngressRule{
+					{
+						IngressRuleValue: networkingv1.IngressRuleValue{
+							HTTP: &networkingv1.HTTPIngressRuleValue{
+								Paths: []networkingv1.HTTPIngressPath{
+									{Path: "/", PathType: &pathType},
+								},
+							},
+						},
+					},
+				},
+			},
+		}
+
+		for _, tt := range []struct {
+			name string
+			mode string
+			want bool
+		}{
+			{name: "strict", mode: IngressReadinessModeStrict, want: false},
+			{name: "permissive", mode: IngressReadinessModePermissive, want: true},
+			{name: "invalid falls back to strict", mode: "dev", want: false},
+		} {
+			t.Run(tt.name, func(t *testing.T) {
+				client := fake.NewClientBuilder().WithScheme(scheme).WithObjects(mcpServer.DeepCopy(), ingress.DeepCopy()).Build()
+				r := MCPServerReconciler{Client: client, Scheme: scheme, IngressReadinessMode: tt.mode}
+				ready, err := r.checkIngressReady(context.Background(), mcpServer)
+				if err != nil {
+					t.Fatalf("failed to check ingress readiness: %v", err)
+				}
+				assertEqual(t, "ready", ready, tt.want)
+			})
+		}
+	})
 }
 
 func TestRenderGatewayPolicyIncludesCrossNamespaceReferences(t *testing.T) {

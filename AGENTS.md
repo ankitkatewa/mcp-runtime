@@ -142,6 +142,7 @@ kubectl patch secret mcp-sentinel-secrets -n mcp-sentinel --type merge -p '{"str
 ## Debugging checklist (common failures)
 
 - **“ingressHost is required” (operator):** set `spec.ingressHost` on the `MCPServer`, or operator env `MCP_DEFAULT_INGRESS_HOST`, or `MCP_PLATFORM_DOMAIN` for `mcp.<domain>` defaults.
+- **MCPServer stuck `PartiallyReady` with working ingress traffic:** default ingress readiness is strict and waits for `Ingress.status.loadBalancer.ingress[]`. For dev / NodePort-style ingress controllers that route without publishing LB status, set operator env `MCP_INGRESS_READINESS_MODE=permissive`; this treats an Ingress with rules as ready. Keep the default `strict` mode for production setups that rely on published LB status.
 - **Port mismatch:** the bundled Go example listens on `8088` by default; align `MCPServer` `port` / `servicePort` and container `PORT` if you overrode them.
 - **Analytics 401:** use gateway/ingest URL and key, not the app’s random env. Example: `ANALYTICS_INGEST_URL=http://mcp-sentinel-ingest.mcp-sentinel.svc.cluster.local:8081/events` and `ANALYTICS_API_KEY` from `mcp-sentinel-secrets` (`API_KEYS` key).
 - **Secret not found in workload namespace:** copy `mcp-sentinel-secrets` or use a shared secret reference.

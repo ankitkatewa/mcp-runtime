@@ -36,6 +36,7 @@ type CLIConfig struct {
 	OperatorImage             string // Override for operator image
 	GatewayProxyImage         string // Optional default image for the MCP gateway sidecar
 	AnalyticsIngestURL        string // Optional analytics ingest URL override for the MCP gateway sidecar
+	IngressReadinessMode      string // Optional operator ingress readiness mode: strict or permissive
 	ClusterName               string // Optional cluster label attached to analytics/audit events
 
 	// Server defaults
@@ -82,6 +83,7 @@ func LoadCLIConfig() *CLIConfig {
 		OperatorImage:               os.Getenv("MCP_OPERATOR_IMAGE"), // No default, empty means auto
 		GatewayProxyImage:           os.Getenv("MCP_GATEWAY_PROXY_IMAGE"),
 		AnalyticsIngestURL:          getEnvCompat("MCP_SENTINEL_INGEST_URL", "MCP_ANALYTICS_INGEST_URL"),
+		IngressReadinessMode:        os.Getenv("MCP_INGRESS_READINESS_MODE"),
 		ClusterName:                 getEnvOrDefault("MCP_CLUSTER_NAME", "local"),
 		DefaultServerPort:           parseIntEnv("MCP_DEFAULT_SERVER_PORT", defaultServerPort),
 		ProvisionedRegistryURL:      os.Getenv("PROVISIONED_REGISTRY_URL"),

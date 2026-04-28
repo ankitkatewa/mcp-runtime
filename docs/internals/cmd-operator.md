@@ -56,6 +56,7 @@ Current defaults include:
 | service port | `80` |
 | ingress class | `traefik` |
 | ingress path type | `Prefix` |
+| ingress readiness mode | `strict` |
 | CPU request | `50m` |
 | memory request | `64Mi` |
 | CPU limit | `500m` |
@@ -91,6 +92,13 @@ path routing is important for local and shared gateway setups, so keep tests for
 - `MCP_DEFAULT_INGRESS_HOST`
 - `spec.publicPathPrefix`
 - ingress class-specific annotations
+- strict and permissive ingress readiness modes
+
+Ingress readiness defaults to strict mode, which requires
+`Ingress.status.loadBalancer.ingress[]`. Set operator env
+`MCP_INGRESS_READINESS_MODE=permissive` for local port-forward or NodePort-style
+setups where traffic works but the ingress controller does not publish load
+balancer status.
 
 ## Status Contract
 

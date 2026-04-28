@@ -46,6 +46,9 @@ type MCPServerReconciler struct {
 	// DefaultIngressHost is the default ingress host if not specified in the CR.
 	DefaultIngressHost string
 
+	// IngressReadinessMode controls how ingress readiness is evaluated.
+	IngressReadinessMode string
+
 	// ProvisionedRegistry holds the provisioned registry configuration.
 	// If nil or URL is empty, provisioned registry features are disabled.
 	ProvisionedRegistry *RegistryConfig
@@ -1510,17 +1513,12 @@ func (r *MCPServerReconciler) checkIngressReady(ctx context.Context, mcpServer *
 		return true, nil
 	}
 
-	// The presence of an IngressClass alone is not a readiness signal. Some local/dev
-	// controllers will accept ingress resources before publishing any admitted status, but
-	// marking the route ready here can hide real traffic-programming delays in production.
-	if ingress.Spec.IngressClassName != nil && *ingress.Spec.IngressClassName != "" && len(ingress.Spec.Rules) > 0 {
-		ingressClass := &networkingv1.IngressClass{}
-		if err := r.Get(ctx, types.NamespacedName{Name: *ingress.Spec.IngressClassName}, ingressClass); err != nil && !errors.IsNotFound(err) {
-			return false, err
-		}
+	mode, _ := NormalizeIngressReadinessMode(r.IngressReadinessMode)
+	if mode != IngressReadinessModePermissive {
+		return false, nil
 	}
 
-	return false, nil
+	return len(ingress.Spec.Rules) > 0, nil
 }
 
 func (r *MCPServerReconciler) updateStatus(ctx context.Context, mcpServer *mcpv1alpha1.MCPServer, phase, message string, readiness resourceReadiness) {

@@ -2383,6 +2383,9 @@ func operatorEnvOverrides(gatewayProxyImage string) []operatorEnvVar {
 	if ingestURL != "" {
 		envVars = append(envVars, operatorEnvVar{Name: "MCP_SENTINEL_INGEST_URL", Value: ingestURL})
 	}
+	if mode := strings.TrimSpace(DefaultCLIConfig.IngressReadinessMode); mode != "" {
+		envVars = append(envVars, operatorEnvVar{Name: "MCP_INGRESS_READINESS_MODE", Value: mode})
+	}
 	registryEndpoint := strings.TrimSpace(GetRegistryEndpoint())
 	if registryEndpoint != "" {
 		envVars = append(envVars, operatorEnvVar{Name: "MCP_REGISTRY_ENDPOINT", Value: registryEndpoint})

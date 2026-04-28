@@ -188,6 +188,7 @@ func TestLoadOperatorConfig(t *testing.T) {
 	t.Setenv("MCP_CLUSTER_NAME", "prod-cluster")
 	t.Setenv("DEFAULT_INGRESS_HOST", "mcp.example.com")
 	t.Setenv("DEFAULT_INGRESS_CLASS", "nginx")
+	t.Setenv("MCP_INGRESS_READINESS_MODE", "permissive")
 	t.Setenv("PROVISIONED_REGISTRY_URL", "registry.example.com:5000")
 	t.Setenv("MCP_REGISTRY_ENDPOINT", "10.43.39.164:5000")
 	t.Setenv("PROVISIONED_REGISTRY_USERNAME", "user")
@@ -203,6 +204,9 @@ func TestLoadOperatorConfig(t *testing.T) {
 	}
 	if cfg.DefaultIngressClass != "nginx" {
 		t.Fatalf("expected ingress class override, got %q", cfg.DefaultIngressClass)
+	}
+	if cfg.IngressReadinessMode != IngressReadinessModePermissive {
+		t.Fatalf("expected ingress readiness mode override, got %q", cfg.IngressReadinessMode)
 	}
 	if cfg.ProvisionedRegistryURL != "registry.example.com:5000" {
 		t.Fatalf("expected registry url override, got %q", cfg.ProvisionedRegistryURL)
@@ -247,5 +251,27 @@ func TestLoadOperatorConfigUsesLegacyAnalyticsEnv(t *testing.T) {
 	cfg := LoadOperatorConfig()
 	if cfg.AnalyticsIngestURL != "http://legacy-ingest" {
 		t.Fatalf("expected legacy analytics ingest url override, got %q", cfg.AnalyticsIngestURL)
+	}
+}
+
+func TestNormalizeIngressReadinessMode(t *testing.T) {
+	for _, tt := range []struct {
+		name      string
+		value     string
+		wantMode  string
+		wantValid bool
+	}{
+		{name: "empty defaults to strict", value: "", wantMode: IngressReadinessModeStrict, wantValid: true},
+		{name: "strict", value: "strict", wantMode: IngressReadinessModeStrict, wantValid: true},
+		{name: "permissive", value: "permissive", wantMode: IngressReadinessModePermissive, wantValid: true},
+		{name: "trims and normalizes case", value: " Permissive ", wantMode: IngressReadinessModePermissive, wantValid: true},
+		{name: "invalid falls back to strict", value: "dev", wantMode: IngressReadinessModeStrict, wantValid: false},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			gotMode, gotValid := NormalizeIngressReadinessMode(tt.value)
+			if gotMode != tt.wantMode || gotValid != tt.wantValid {
+				t.Fatalf("NormalizeIngressReadinessMode(%q) = %q, %v; want %q, %v", tt.value, gotMode, gotValid, tt.wantMode, tt.wantValid)
+			}
+		})
 	}
 }
