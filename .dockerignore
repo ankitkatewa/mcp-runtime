@@ -2,10 +2,20 @@
 .gocache/
 bin/
 man/
+tags
+TAGS
 cover.out
 coverage.out
 docs/
 unittesting_strategy.md
+
+# Local service binaries produced by ad-hoc `go build` runs should not enter
+# image build contexts that copy the repository root.
+services/api/api
+services/ingest/ingest
+services/mcp-proxy/mcp-proxy
+services/processor/processor
+services/ui/mcp-sentinel-ui
 
 # controller-runtime client
 .fakehome/

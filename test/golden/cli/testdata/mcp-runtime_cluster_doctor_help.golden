@@ -1,4 +1,4 @@
-Detect the Kubernetes distribution and check that the registry service, cluster DNS, operator/CRD prerequisites, and ingress (Traefik) wiring are in place. Prints remediation steps for your distribution when something is missing. See docs/cluster-readiness.md for the full per-distribution checklist.
+Detect the Kubernetes distribution and check that the registry service, cluster DNS, operator/CRD prerequisites, ingress (Traefik) wiring, image pulls, Sentinel, and MCPServer reconciliation are healthy. Prints remediation steps for your distribution when something is missing. See docs/cluster-readiness.md for the full per-distribution checklist.
 
 Usage:
   mcp-runtime cluster doctor [flags]

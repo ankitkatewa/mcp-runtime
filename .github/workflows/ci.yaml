@@ -206,7 +206,7 @@ jobs:
     name: Generated File Drift
     runs-on: ubuntu-latest
     needs: [changed-paths]
-    if: github.event_name == 'workflow_dispatch' || needs.changed-paths.outputs.code == 'true'
+    if: github.event_name == 'workflow_dispatch' || needs.changed-paths.outputs.code == 'true' || needs.changed-paths.outputs.docs == 'true'
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -220,10 +220,13 @@ jobs:
       - name: Regenerate CRDs/manifests
         run: make -f Makefile.operator generate manifests
 
+      - name: Regenerate Go package reference
+        run: python3 docs/scripts/generate_go_package_reference.py
+
       - name: Check for drift
         run: |
           if ! git diff --quiet; then
-            echo "Generated files are out of date. Run 'make -f Makefile.operator generate manifests'."
+            echo "Generated files are out of date. Run 'make -f Makefile.operator generate manifests' and 'python3 docs/scripts/generate_go_package_reference.py'."
             git diff
             exit 1
           fi

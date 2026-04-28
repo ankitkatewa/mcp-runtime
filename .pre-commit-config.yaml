@@ -17,3 +17,9 @@ repos:
         entry: go vet ./...
         language: system
         pass_filenames: false
+      - id: go-doc-reference-drift
+        name: go doc package reference drift
+        entry: bash -c 'python3 docs/scripts/generate_go_package_reference.py && git diff --exit-code -- docs/internals/go-package-reference.md'
+        language: system
+        pass_filenames: false
+        files: ^(api/v1alpha1/|pkg/metadata/|internal/operator/|internal/cli/|cmd/mcp-runtime/|cmd/operator/|docs/scripts/generate_go_package_reference\.py|docs/internals/go-package-reference\.md)

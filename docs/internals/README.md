@@ -2,7 +2,9 @@
 
 This section teaches the MCP Runtime codebase from the inside out. Use it when you want to modify the CLI, operator, Kubernetes API types, Sentinel services, manifests, or tests without reverse-engineering the repository from scratch.
 
-For platform usage, start with the [user docs](../README.md). For guided contributor onboarding, use the Tessl skill [codebase-onboarding-check](https://tessl.io/registry/skills/github/Agent-Hellboy/codebase-onboarding-check/codebase-onboarding-check) with this repository; it can turn these docs into comprehension checks and a contribution readiness plan.
+For platform usage, start with the [user docs](../README.md). This section is
+for contributors who need to understand package boundaries, runtime flows, and
+the checks that protect each subsystem.
 
 ## Mental model
 
@@ -41,6 +43,7 @@ flowchart LR
 | CLI entrypoint | [`cmd-mcp-runtime.md`](cmd-mcp-runtime.md) | Shows how the binary starts, wires Cobra commands, and reports errors. |
 | CLI implementation | [`internal-cli.md`](internal-cli.md) | Covers setup, bootstrap, registry, server, access, status, sentinel, auth, and pipeline commands. |
 | Kubernetes API types | [`api-types.md`](api-types.md) | Defines the public CRD shapes consumed by users, tests, and the operator. |
+| Generated Go reference | [`go-package-reference.md`](go-package-reference.md) | Captures `go doc` output for the main contributor-facing packages. |
 | Operator | [`cmd-operator.md`](cmd-operator.md) | Explains manager startup and reconciliation from desired state to Kubernetes resources. |
 | Metadata helpers | [`pkg-metadata.md`](pkg-metadata.md) | Covers `.mcp` metadata loading, host resolution, and CRD generation helpers. |
 | Manifests and examples | [`config-and-examples.md`](config-and-examples.md) | Explains Kustomize overlays, registry/ingress config, and example MCP servers. |
@@ -123,7 +126,22 @@ Keep shared behavior in `pkg/` only when multiple binaries or services need it. 
 3. Read [operator internals](cmd-operator.md) to understand how `MCPServer` state becomes Kubernetes workloads and ingress.
 4. Read [config and examples](config-and-examples.md), then run or inspect the example server manifests.
 5. Read [tests](tests.md) before making changes; it shows the fastest feedback loop and the broader CI safety net.
-6. Use the Tessl [codebase-onboarding-check skill](https://tessl.io/registry/skills/github/Agent-Hellboy/codebase-onboarding-check/codebase-onboarding-check) to quiz yourself on the architecture, identify weak spots, and produce a focused contribution plan.
+6. Use the change playbooks below to choose the narrowest useful tests before
+   broadening to full CI coverage.
+
+## Refreshing Package Reference
+
+These pages are contributor guides. The raw Go package reference is generated
+into [Go Package Reference](go-package-reference.md). Refresh it from the current
+checkout with:
+
+```bash
+python3 docs/scripts/generate_go_package_reference.py
+```
+
+Use the generated output to verify exported types, functions, and comments. Keep
+the narrative internals pages focused on stable contracts and contributor
+workflows.
 
 ## Change playbooks
 
@@ -146,5 +164,3 @@ Before opening a change, confirm:
 - CLI help changes update golden snapshots intentionally.
 - Narrow tests pass for touched packages.
 - Full `go test ./... -count=1 -race` is run before merge when the change touches shared behavior.
-
-> Line references in the linked internals pages match the repository at the time of writing; they are 1-based and may drift after refactors.
