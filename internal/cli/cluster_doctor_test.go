@@ -2,6 +2,7 @@ package cli
 
 import (
 	"errors"
+	"fmt"
 	"strings"
 	"testing"
 )
@@ -303,11 +304,12 @@ func TestCheckRegistryReachableFromCluster(t *testing.T) {
 }
 
 func TestParseImagePullCandidates(t *testing.T) {
+	sep := imagePullListSep
 	out := strings.Join([]string{
-		"mcp-sentinel|mcp-sentinel-api-abc|10.96.64.95:5000/mcp-sentinel-api:latest,|ImagePullBackOff,",
-		"mcp-runtime|operator-abc|registry.registry.svc.cluster.local:5000/mcp-runtime-operator:latest,|Running,",
-		"registry|registry-abc|registry.local/distribution:latest,|ErrImagePull,",
-		"mcp-servers|demo-init-abc|registry.local/bootstrap:latest,registry.local/demo:latest,|ImagePullBackOff,",
+		"mcp-sentinel|mcp-sentinel-api-abc|10.96.64.95:5000/mcp-sentinel-api:latest" + sep + "|ImagePullBackOff" + sep + "|",
+		"mcp-runtime|operator-abc|registry.registry.svc.cluster.local:5000/mcp-runtime-operator:latest" + sep + "|Running" + sep + "|",
+		"registry|registry-abc|registry.local/distribution:latest" + sep + "|ErrImagePull" + sep + "|",
+		"mcp-servers|demo-init-abc|registry.local/bootstrap:latest" + sep + "registry.local/demo:latest" + sep + "|ImagePullBackOff" + sep + "|",
 	}, "\n")
 
 	candidates := parseImagePullCandidates(out)
@@ -328,9 +330,29 @@ func TestParseImagePullCandidates(t *testing.T) {
 	}
 }
 
+func TestParseImagePullCandidatesPreservesCommasInMessages(t *testing.T) {
+	// Real kubelet messages contain commas; the unit-separator delimiter
+	// must keep them intact rather than fragmenting the message.
+	sep := imagePullListSep
+	msg := `failed to pull image "registry.local/demo:latest": rpc error: code = Unknown, desc = failed to do request: ` + registryHTTPPullMismatch
+	line := "mcp-servers|demo-abc|registry.local/demo:latest" + sep + "|ImagePullBackOff" + sep + "|" + msg + sep
+	candidates := parseImagePullCandidates(line)
+	if len(candidates) != 1 {
+		t.Fatalf("expected 1 candidate, got %d", len(candidates))
+	}
+	if len(candidates[0].Messages) != 1 || candidates[0].Messages[0] != msg {
+		t.Fatalf("expected message preserved verbatim, got %#v", candidates[0].Messages)
+	}
+	if !hasRegistryHTTPPullMismatchMessage(candidates[0].Messages) {
+		t.Fatal("expected mismatch substring detected in unsplit message")
+	}
+}
+
 func TestCheckRegistryHTTPPullMismatch(t *testing.T) {
+	sep := imagePullListSep
+
 	t.Run("reports HTTP registry mismatch from describe pod events", func(t *testing.T) {
-		pods := "mcp-sentinel|mcp-sentinel-api-abc|10.96.64.95:5000/mcp-sentinel-api:latest,|ImagePullBackOff,\n"
+		pods := "mcp-sentinel|mcp-sentinel-api-abc|10.96.64.95:5000/mcp-sentinel-api:latest" + sep + "|ImagePullBackOff" + sep + "|\n"
 		describe := `Name:             mcp-sentinel-api-abc
 Namespace:        mcp-sentinel
 Events:
@@ -355,12 +377,12 @@ Events:
 		if check.OK {
 			t.Fatal("expected registry HTTP mismatch to fail")
 		}
-		for _, want := range []string{"mcp-sentinel/mcp-sentinel-api-abc", "10.96.64.95:5000/mcp-sentinel-api:latest", registryHTTPPullMismatch} {
+		for _, want := range []string{"mcp-sentinel/mcp-sentinel-api-abc", "10.96.64.95:5000/mcp-sentinel-api:latest", "(ImagePullBackOff)", registryHTTPPullMismatch} {
 			if !strings.Contains(check.Detail, want) {
 				t.Fatalf("detail should contain %q, got %q", want, check.Detail)
 			}
 		}
-		for _, want := range []string{"insecure registry", "containerd", "exact image host"} {
+		for _, want := range []string{"insecure registry", "container runtime", "exact image host"} {
 			if !strings.Contains(check.Remedy, want) {
 				t.Fatalf("remedy should contain %q, got %q", want, check.Remedy)
 			}
@@ -368,7 +390,7 @@ Events:
 	})
 
 	t.Run("reports HTTP registry mismatch from init container pull events", func(t *testing.T) {
-		pods := "mcp-servers|demo-init-abc|registry.local/bootstrap:latest,registry.local/demo:latest,|Init:ImagePullBackOff,\n"
+		pods := "mcp-servers|demo-init-abc|registry.local/bootstrap:latest" + sep + "registry.local/demo:latest" + sep + "|Init:ImagePullBackOff" + sep + "|\n"
 		describe := `Name:             demo-init-abc
 Namespace:        mcp-servers
 Init Containers:
@@ -396,7 +418,7 @@ Events:
 		if check.OK {
 			t.Fatal("expected registry HTTP mismatch for init container to fail")
 		}
-		for _, want := range []string{"mcp-servers/demo-init-abc", "registry.local/bootstrap:latest", registryHTTPPullMismatch} {
+		for _, want := range []string{"mcp-servers/demo-init-abc", "registry.local/bootstrap:latest", "(Init:ImagePullBackOff)", registryHTTPPullMismatch} {
 			if !strings.Contains(check.Detail, want) {
 				t.Fatalf("detail should contain %q, got %q", want, check.Detail)
 			}
@@ -404,7 +426,11 @@ Events:
 	})
 
 	t.Run("reports HTTP registry mismatch from waiting status message", func(t *testing.T) {
-		pods := `mcp-servers|demo-status-abc|registry.local/bootstrap:latest,registry.local/demo:latest,||failed to pull image "registry.local/bootstrap:latest": failed to do request: Head "https://registry.local/v2/bootstrap/manifests/latest": http: server gave HTTP response to HTTPS client,`
+		// Reasons field is empty here; only the waiting message identifies
+		// the candidate. Detail should still surface the mismatch but won't
+		// include a reason in parentheses.
+		msg := `failed to pull image "registry.local/bootstrap:latest": failed to do request: Head "https://registry.local/v2/bootstrap/manifests/latest": http: server gave HTTP response to HTTPS client`
+		pods := "mcp-servers|demo-status-abc|registry.local/bootstrap:latest" + sep + "registry.local/demo:latest" + sep + "||" + msg + sep
 		mock := &MockExecutor{
 			CommandFunc: func(spec ExecSpec) *MockCommand {
 				if contains(spec.Args, "describe") {
@@ -423,10 +449,13 @@ Events:
 				t.Fatalf("detail should contain %q, got %q", want, check.Detail)
 			}
 		}
+		if strings.Contains(check.Detail, "()") {
+			t.Fatalf("detail should omit empty reason parentheses, got %q", check.Detail)
+		}
 	})
 
 	t.Run("passes when pull failures do not include HTTP mismatch event", func(t *testing.T) {
-		pods := "mcp-servers|demo-abc|registry.local/demo:latest,|ErrImagePull,\n"
+		pods := "mcp-servers|demo-abc|registry.local/demo:latest" + sep + "|ErrImagePull" + sep + "|\n"
 		describe := `Events:
   Warning  Failed  kubelet  Failed to pull image "registry.local/demo:latest": not found
 `
@@ -447,8 +476,8 @@ Events:
 
 	t.Run("fails when pod inspection fails for pull candidates", func(t *testing.T) {
 		pods := strings.Join([]string{
-			"mcp-servers|demo-a|registry.local/demo-a:latest,|ErrImagePull,",
-			"mcp-servers|demo-b|registry.local/demo-b:latest,|ImagePullBackOff,",
+			"mcp-servers|demo-a|registry.local/demo-a:latest" + sep + "|ErrImagePull" + sep + "|",
+			"mcp-servers|demo-b|registry.local/demo-b:latest" + sep + "|ImagePullBackOff" + sep + "|",
 		}, "\n")
 		mock := &MockExecutor{
 			CommandFunc: func(spec ExecSpec) *MockCommand {
@@ -470,6 +499,38 @@ Events:
 		}
 		if !strings.Contains(check.Remedy, "kubectl describe pod") {
 			t.Fatalf("remedy should mention manual describe, got %q", check.Remedy)
+		}
+	})
+
+	t.Run("caps describe fallback when many ImagePullBackOff pods exist", func(t *testing.T) {
+		// Build imagePullDescribeLimit + 5 candidates whose waiting messages
+		// don't match. Only the first imagePullDescribeLimit should trigger
+		// describe calls.
+		var lines []string
+		for i := range imagePullDescribeLimit + 5 {
+			lines = append(lines, fmt.Sprintf("ns%d|pod%d|registry.local/x:latest"+sep+"|ImagePullBackOff"+sep+"|", i, i))
+		}
+		pods := strings.Join(lines, "\n")
+		describeCalls := 0
+		mock := &MockExecutor{
+			CommandFunc: func(spec ExecSpec) *MockCommand {
+				if contains(spec.Args, "describe") {
+					describeCalls++
+					return &MockCommand{OutputData: []byte("Events:\n  Warning Failed kubelet Failed to pull image: not found\n")}
+				}
+				return &MockCommand{OutputData: []byte(pods)}
+			},
+		}
+		kubectl := &KubectlClient{exec: mock, validators: nil}
+		check := checkRegistryHTTPPullMismatch(kubectl)
+		if !check.OK {
+			t.Fatalf("expected OK when no candidates have HTTP mismatch, got detail=%q", check.Detail)
+		}
+		if describeCalls != imagePullDescribeLimit {
+			t.Fatalf("expected describe calls capped at %d, got %d", imagePullDescribeLimit, describeCalls)
+		}
+		if !strings.Contains(check.Detail, fmt.Sprintf("inspected first %d", imagePullDescribeLimit)) {
+			t.Fatalf("detail should mention capped inspection, got %q", check.Detail)
 		}
 	})
 }

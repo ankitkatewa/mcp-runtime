@@ -50,6 +50,17 @@ const (
 	doctorSentinelAPIService  = "mcp-sentinel-api"
 
 	registryHTTPPullMismatch = "http: server gave HTTP response to HTTPS client"
+
+	// imagePullListSep separates list items emitted by the image-pull jsonpath.
+	// ASCII Unit Separator (0x1f) avoids collisions with commas that appear
+	// inside kubelet error messages.
+	imagePullListSep = "\x1f"
+
+	// imagePullDescribeLimit caps how many `kubectl describe pod` fallbacks
+	// the HTTP-mismatch check issues per run. Most clusters that hit this
+	// failure surface it via the waiting message first pass; the describe
+	// pass is just a fallback for stale events.
+	imagePullDescribeLimit = 8
 )
 
 // AllOK reports whether every check passed.
@@ -1134,7 +1145,7 @@ type imagePullPodCandidate struct {
 }
 
 func checkRegistryHTTPPullMismatch(kubectl KubectlRunner) DoctorCheck {
-	out, err := readKubectlOutput(kubectl, []string{"get", "pods", "-A", "-o", `jsonpath={range .items[*]}{.metadata.namespace}{"|"}{.metadata.name}{"|"}{range .spec.initContainers[*]}{.image}{","}{end}{range .spec.containers[*]}{.image}{","}{end}{"|"}{range .status.initContainerStatuses[*]}{.state.waiting.reason}{","}{end}{range .status.containerStatuses[*]}{.state.waiting.reason}{","}{end}{"|"}{range .status.initContainerStatuses[*]}{.state.waiting.message}{","}{end}{range .status.containerStatuses[*]}{.state.waiting.message}{","}{end}{"\n"}{end}`})
+	out, err := readKubectlOutput(kubectl, []string{"get", "pods", "-A", "-o", buildImagePullJSONPath()})
 	if err != nil {
 		return DoctorCheck{
 			Name:   "registry HTTP pull mismatch",
@@ -1153,18 +1164,24 @@ func checkRegistryHTTPPullMismatch(kubectl KubectlRunner) DoctorCheck {
 		}
 	}
 
+	// First pass: check waiting messages already returned by `kubectl get`.
+	// Cheap and avoids any describe calls when the kubelet event is fresh.
+	for _, candidate := range candidates {
+		if hasRegistryHTTPPullMismatchMessage(candidate.Messages) {
+			return mismatchResult(candidate)
+		}
+	}
+
+	// Second pass: fall back to `kubectl describe`, capped so a cluster
+	// with many ImagePullBackOff pods doesn't shell out indefinitely.
 	describeFailures := 0
 	var firstDescribeFailure string
+	inspected := 0
 	for _, candidate := range candidates {
-		if strings.Contains(strings.Join(candidate.Messages, " "), registryHTTPPullMismatch) {
-			return DoctorCheck{
-				Name:   "registry HTTP pull mismatch",
-				OK:     false,
-				Detail: fmt.Sprintf("pod %s/%s image %s failed pull: %s", candidate.Namespace, candidate.Name, firstNonEmpty(candidate.Images, "unknown"), registryHTTPPullMismatch),
-				Remedy: "Registry HTTP pull mismatch: kubelet tried HTTPS against the HTTP registry. Configure the node/containerd insecure registry or Kind mirror for the exact image host, or use TLS.",
-			}
+		if inspected >= imagePullDescribeLimit {
+			break
 		}
-
+		inspected++
 		describe, err := readKubectlOutput(kubectl, []string{"describe", "pod", candidate.Name, "-n", candidate.Namespace})
 		if err != nil {
 			describeFailures++
@@ -1173,30 +1190,69 @@ func checkRegistryHTTPPullMismatch(kubectl KubectlRunner) DoctorCheck {
 			}
 			continue
 		}
-		if !strings.Contains(describe, registryHTTPPullMismatch) {
-			continue
-		}
-		return DoctorCheck{
-			Name:   "registry HTTP pull mismatch",
-			OK:     false,
-			Detail: fmt.Sprintf("pod %s/%s image %s failed pull: %s", candidate.Namespace, candidate.Name, firstNonEmpty(candidate.Images, "unknown"), registryHTTPPullMismatch),
-			Remedy: "Registry HTTP pull mismatch: kubelet tried HTTPS against the HTTP registry. Configure the node/containerd insecure registry or Kind mirror for the exact image host, or use TLS.",
+		if strings.Contains(describe, registryHTTPPullMismatch) {
+			return mismatchResult(candidate)
 		}
 	}
 	if describeFailures > 0 {
+		detail := fmt.Sprintf("pod inspection failed for %d/%d ErrImagePull/ImagePullBackOff candidate(s); first error: %s", describeFailures, inspected, firstDescribeFailure)
+		if inspected < len(candidates) {
+			detail += fmt.Sprintf(" (inspected first %d of %d)", inspected, len(candidates))
+		}
 		return DoctorCheck{
 			Name:   "registry HTTP pull mismatch",
 			OK:     false,
-			Detail: fmt.Sprintf("pod inspection failed for %d/%d ErrImagePull/ImagePullBackOff candidate(s); first error: %s", describeFailures, len(candidates), firstDescribeFailure),
+			Detail: detail,
 			Remedy: "inspect pull-failing pods manually with `kubectl describe pod <name> -n <namespace>` and check kubectl RBAC/connectivity",
 		}
 	}
 
+	detail := fmt.Sprintf("%d ErrImagePull/ImagePullBackOff pod(s) found, none with HTTP-vs-HTTPS registry mismatch events", len(candidates))
+	if inspected < len(candidates) {
+		detail = fmt.Sprintf("%d ErrImagePull/ImagePullBackOff pod(s) found; inspected first %d, none with HTTP-vs-HTTPS registry mismatch events", len(candidates), inspected)
+	}
 	return DoctorCheck{
 		Name:   "registry HTTP pull mismatch",
 		OK:     true,
-		Detail: fmt.Sprintf("%d ErrImagePull/ImagePullBackOff pod(s) found, none with HTTP-vs-HTTPS registry mismatch events", len(candidates)),
+		Detail: detail,
 	}
+}
+
+// buildImagePullJSONPath returns the kubectl jsonpath used by the HTTP
+// mismatch check. Inner list items are joined with imagePullListSep (0x1f)
+// so commas in kubelet messages don't fragment the parse.
+func buildImagePullJSONPath() string {
+	return fmt.Sprintf(
+		`jsonpath={range .items[*]}{.metadata.namespace}{"|"}{.metadata.name}{"|"}{range .spec.initContainers[*]}{.image}{"%[1]s"}{end}{range .spec.containers[*]}{.image}{"%[1]s"}{end}{"|"}{range .status.initContainerStatuses[*]}{.state.waiting.reason}{"%[1]s"}{end}{range .status.containerStatuses[*]}{.state.waiting.reason}{"%[1]s"}{end}{"|"}{range .status.initContainerStatuses[*]}{.state.waiting.message}{"%[1]s"}{end}{range .status.containerStatuses[*]}{.state.waiting.message}{"%[1]s"}{end}{"\n"}{end}`,
+		imagePullListSep,
+	)
+}
+
+func mismatchResult(c imagePullPodCandidate) DoctorCheck {
+	image := firstNonEmpty(c.Images, "unknown")
+	reason := pickImagePullReason(c.Reasons)
+	var detail string
+	if reason != "" {
+		detail = fmt.Sprintf("pod %s/%s image %s (%s) failed pull: %s", c.Namespace, c.Name, image, reason, registryHTTPPullMismatch)
+	} else {
+		detail = fmt.Sprintf("pod %s/%s image %s failed pull: %s", c.Namespace, c.Name, image, registryHTTPPullMismatch)
+	}
+	return DoctorCheck{
+		Name:   "registry HTTP pull mismatch",
+		OK:     false,
+		Detail: detail,
+		Remedy: "Registry HTTP pull mismatch: kubelet tried HTTPS against the HTTP registry. Configure the node container runtime's insecure registry mirror for the exact image host, or use TLS.",
+	}
+}
+
+func pickImagePullReason(reasons []string) string {
+	for _, r := range reasons {
+		switch trimmed := strings.TrimSpace(r); trimmed {
+		case "Init:ErrImagePull", "Init:ImagePullBackOff", "ErrImagePull", "ImagePullBackOff":
+			return trimmed
+		}
+	}
+	return ""
 }
 
 func parseImagePullCandidates(value string) []imagePullPodCandidate {
@@ -1206,10 +1262,10 @@ func parseImagePullCandidates(value string) []imagePullPodCandidate {
 		if len(parts) < 4 {
 			continue
 		}
-		reasons := splitCommaTrim(parts[3])
+		reasons := splitSepTrim(parts[3], imagePullListSep)
 		messages := []string{}
 		if len(parts) == 5 {
-			messages = splitCommaTrim(parts[4])
+			messages = splitSepTrim(parts[4], imagePullListSep)
 		}
 		if !hasImagePullReason(reasons) && !hasRegistryHTTPPullMismatchMessage(messages) {
 			continue
@@ -1217,7 +1273,7 @@ func parseImagePullCandidates(value string) []imagePullPodCandidate {
 		candidates = append(candidates, imagePullPodCandidate{
 			Namespace: strings.TrimSpace(parts[0]),
 			Name:      strings.TrimSpace(parts[1]),
-			Images:    splitCommaTrim(parts[2]),
+			Images:    splitSepTrim(parts[2], imagePullListSep),
 			Reasons:   reasons,
 			Messages:  messages,
 		})
@@ -1357,10 +1413,14 @@ func decodeBase64(value string) string {
 }
 
 func splitCommaTrim(value string) []string {
+	return splitSepTrim(value, ",")
+}
+
+func splitSepTrim(value, sep string) []string {
 	if strings.TrimSpace(value) == "" {
 		return nil
 	}
-	parts := strings.Split(value, ",")
+	parts := strings.Split(value, sep)
 	out := make([]string, 0, len(parts))
 	for _, p := range parts {
 		p = strings.TrimSpace(p)

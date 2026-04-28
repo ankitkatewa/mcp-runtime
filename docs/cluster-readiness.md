@@ -236,12 +236,13 @@ operator, gateway proxy, and Sentinel images, then deploys pods that pull those
 images. On k3s hosts where `~/.kube/config` is empty or minimal, pass
 `--kubeconfig /etc/rancher/k3s/k3s.yaml` to setup.
 
-For the bundled registry, setup may choose the registry Service `ClusterIP:port`
-as the pull host and prints it as the registry **Internal URL** after the Service
-exists. If that host was not configured in k3s beforehand, copy the printed value
-into `registries.yaml`, restart k3s/containerd, then rerun setup. To avoid this
-two-step flow, configure a stable external registry or explicit
-`MCP_REGISTRY_ENDPOINT` that every node already trusts.
+The fastest path is to **preconfigure the steps below before running setup** so
+the host k3s pulls from is already trusted on first attempt. If you skip that
+preflight, expect setup to fail once: it prints the registry **Internal URL**
+after the Service exists; copy that `host:port` into `registries.yaml`, restart
+k3s, then rerun setup. To avoid the rerun on dynamic ClusterIP environments,
+configure a stable external registry or set `MCP_REGISTRY_ENDPOINT` to a
+`host:port` every node already trusts.
 
 1. **Registry mirror.** Create `/etc/rancher/k3s/registries.yaml`:
 
