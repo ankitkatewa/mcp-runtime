@@ -80,7 +80,7 @@ The broad install path: runtime namespace, internal registry, operator, ingress 
 mcp-runtime setup
 mcp-runtime setup --with-tls                   # cert-manager TLS for registry
 mcp-runtime setup --without-sentinel           # skip request-path stack
-mcp-runtime setup --test-mode                  # use kind-loaded operator image
+mcp-runtime setup --test-mode                  # local Kind/dev install path
 ```
 
 Flags: `--registry-type`, `--registry-storage`, `--ingress`, `--ingress-manifest`, `--force-ingress-install`, `--with-tls`, `--test-mode`, `--without-sentinel`, plus operator overrides `--operator-leader-elect`, `--operator-metrics-addr`, `--operator-probe-addr`.

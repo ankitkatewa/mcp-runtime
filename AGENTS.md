@@ -75,13 +75,24 @@ Do not hand-wave command behavior from memory when the docs are meant to reflect
 - **Quick start:**
 
 ```bash
-kind create cluster --name mcp-runtime
+cat > /tmp/mcp-runtime-kind.yaml <<'EOF'
+kind: Cluster
+apiVersion: kind.x-k8s.io/v1alpha4
+containerdConfigPatches:
+  - |-
+    [plugins."io.containerd.grpc.v1.cri".registry.mirrors."registry.registry.svc.cluster.local:5000"]
+      endpoint = ["http://127.0.0.1:32000"]
+EOF
+
+kind create cluster --name mcp-runtime --config /tmp/mcp-runtime-kind.yaml
 ./bin/mcp-runtime bootstrap                              # preflight cluster prerequisites
-./bin/mcp-runtime setup --test-mode --ingress-manifest config/ingress/overlays/http
+./bin/mcp-runtime cluster doctor                         # registry/node readiness
+MCP_SETUP_WAIT_TIMEOUT=900 ./bin/mcp-runtime setup --test-mode --ingress-manifest config/ingress/overlays/http
 kubectl port-forward -n traefik svc/traefik 18080:8000   # expose ingress
 ```
 
 - **Status:** `./bin/mcp-runtime status`
+- **Contributor smoke:** for dashboard access, local image push, MCP JSON-RPC request, and Sentinel event checks, follow `docs/getting-started.md#3-contributor-test-mode-cluster`.
 - **Preflight only (no apply):** `./bin/mcp-runtime bootstrap`. For k3s: add `--apply --provider k3s` to install bundled CoreDNS / local-path manifests (server node only).
 
 ## Endpoints and auth
@@ -143,7 +154,7 @@ kubectl patch secret mcp-sentinel-secrets -n mcp-sentinel --type merge -p '{"str
 **When this section applies**
 
 - **Dev HTTP registry (typical on k3s or lab):** run `./bin/mcp-runtime setup` **without** `--with-tls`. Setup logs `TLS: disabled (dev HTTP mode)` for the internal registry; the registry serves **HTTP**, so you need the **Docker** and **k3s** config in the table below on every machine that builds/pushes or pulls.
-- **`--test-mode`:** meant mainly for **Kind** flows. It **skips building and pushing** operator/gateway images and expects images to be **loaded into Kind** already. It does not remove the need for HTTP registry config if other workloads still pull from an in-cluster HTTP registry. On a real k3s cluster you usually run **full setup without `--test-mode`** so images are built and pushed, then you still need **insecure** registry settings for that HTTP registry on Docker and k3s as below.
+- **`--test-mode`:** meant mainly for **Kind** contributor and CI flows. It keeps production guardrails off, uses local/dev registry behavior, and still needs node/containerd registry routing so pods can pull images from the in-cluster registry. On a real k3s cluster you usually run **full setup without `--test-mode`**, then configure **insecure** registry settings for Docker and k3s as below when using HTTP registry mode.
 
 The platform can install a **plain HTTP** Docker distribution registry (typical in dev with `./bin/mcp-runtime setup` **without** `--with-tls`). Runtimes default to **HTTPS** for any registry; you must allow **HTTP (insecure)** in two places: the host where you run **Docker** (build/push) and every **k3s node** (kubelet/containerd pull for Pods).
 

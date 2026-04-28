@@ -52,7 +52,244 @@ fix gaps with your platform tooling, or `bootstrap --apply --provider k3s` to
 install bundled CoreDNS / local-path on k3s. `cluster doctor` adds
 distribution-specific registry and node readiness checks.
 
-## 3. Install the platform stack
+## 3. Contributor test-mode cluster
+
+For local contributor work, use a disposable Kind cluster and `setup
+--test-mode`. This path is for development and CI-style validation: it uses the
+HTTP ingress overlay, avoids public DNS/TLS, and assumes local Docker can build
+the runtime images.
+
+Create Kind with the registry mirror MCP Runtime expects for image pulls:
+
+```bash
+cat > /tmp/mcp-runtime-kind.yaml <<'EOF'
+kind: Cluster
+apiVersion: kind.x-k8s.io/v1alpha4
+containerdConfigPatches:
+  - |-
+    [plugins."io.containerd.grpc.v1.cri".registry.mirrors."registry.registry.svc.cluster.local:5000"]
+      endpoint = ["http://127.0.0.1:32000"]
+EOF
+
+kind create cluster --name mcp-runtime --config /tmp/mcp-runtime-kind.yaml
+kubectl config use-context kind-mcp-runtime
+```
+
+Build the CLI, run the readiness checks, and install the stack in test mode:
+
+```bash
+make deps
+make build
+
+./bin/mcp-runtime bootstrap
+./bin/mcp-runtime cluster doctor
+
+MCP_SETUP_WAIT_TIMEOUT=900 \
+  ./bin/mcp-runtime setup --test-mode \
+  --ingress-manifest config/ingress/overlays/http
+```
+
+Confirm the install and expose the local dashboard/gateway:
+
+```bash
+./bin/mcp-runtime status
+./bin/mcp-runtime cluster status
+./bin/mcp-runtime registry status
+./bin/mcp-runtime sentinel status
+
+kubectl port-forward -n traefik svc/traefik 18080:8000
+```
+
+Local URLs:
+
+- Dashboard UI: `http://localhost:18080/`
+- API: `http://localhost:18080/api`
+- Demo MCP routes, after applying demo servers: `http://localhost:18080/<server-name>/mcp`
+
+If pods report `ImagePullBackOff`, run `./bin/mcp-runtime cluster doctor`.
+For Kind test mode, the usual cause is a cluster created without the
+`registry.registry.svc.cluster.local:5000` mirror to `127.0.0.1:32000`.
+
+### Test the dashboard, image push, MCP request, and Sentinel
+
+With the port-forward still running, open `http://localhost:18080/` to confirm
+the platform dashboard loads. Then deploy the bundled Go MCP example through the
+same build, push, generate, and deploy path contributors use for server work.
+
+Create a local metadata file that enables gateway policy and Sentinel analytics:
+
+```bash
+cat > /tmp/go-example-mcp.yaml <<'EOF'
+version: v1
+servers:
+  - name: go-example-mcp
+    route: /go-example-mcp/mcp
+    publicPathPrefix: go-example-mcp
+    port: 8088
+    namespace: mcp-servers
+    envVars:
+      - name: MCP_PATH
+        value: /go-example-mcp/mcp
+    tools:
+      - name: add
+        requiredTrust: low
+      - name: upper
+        requiredTrust: medium
+    auth:
+      mode: header
+      humanIDHeader: X-MCP-Human-ID
+      agentIDHeader: X-MCP-Agent-ID
+      sessionIDHeader: X-MCP-Agent-Session
+    policy:
+      mode: allow-list
+      defaultDecision: deny
+      policyVersion: v1
+    session:
+      required: true
+    gateway:
+      enabled: true
+    analytics:
+      enabled: true
+      ingestURL: http://mcp-sentinel-ingest.mcp-sentinel.svc.cluster.local:8081/events
+      apiKeySecretRef:
+        name: go-example-mcp-analytics
+        key: api-key
+EOF
+```
+
+Create the analytics secret in the server namespace:
+
+```bash
+API_KEY="$(
+  kubectl get secret mcp-sentinel-secrets -n mcp-sentinel \
+    -o jsonpath='{.data.API_KEYS}' | base64 -d | cut -d, -f1
+)"
+
+kubectl create secret generic go-example-mcp-analytics \
+  -n mcp-servers \
+  --from-literal=api-key="$API_KEY" \
+  --dry-run=client -o yaml | kubectl apply -f -
+```
+
+Build and push the image into the Kind-accessible registry:
+
+```bash
+./bin/mcp-runtime server build image go-example-mcp \
+  --metadata-file /tmp/go-example-mcp.yaml \
+  --dockerfile examples/go-mcp-server/Dockerfile \
+  --context examples/go-mcp-server \
+  --registry registry.registry.svc.cluster.local:5000 \
+  --tag dev
+
+./bin/mcp-runtime registry push \
+  --image registry.registry.svc.cluster.local:5000/go-example-mcp:dev
+```
+
+Generate and deploy the Kubernetes manifests:
+
+```bash
+rm -rf /tmp/go-example-mcp-manifests
+./bin/mcp-runtime pipeline generate \
+  --file /tmp/go-example-mcp.yaml \
+  --output /tmp/go-example-mcp-manifests
+
+./bin/mcp-runtime pipeline deploy --dir /tmp/go-example-mcp-manifests
+kubectl rollout status deploy/go-example-mcp -n mcp-servers --timeout=180s
+./bin/mcp-runtime server status --namespace mcp-servers
+```
+
+Apply an access grant and session for the local request:
+
+```bash
+cat > /tmp/go-example-access.yaml <<'EOF'
+apiVersion: mcpruntime.org/v1alpha1
+kind: MCPAccessGrant
+metadata:
+  name: go-example-local
+  namespace: mcp-servers
+spec:
+  serverRef:
+    name: go-example-mcp
+  subject:
+    humanID: local-user
+    agentID: local-agent
+  maxTrust: high
+  policyVersion: v1
+  toolRules:
+    - name: add
+      decision: allow
+    - name: upper
+      decision: allow
+---
+apiVersion: mcpruntime.org/v1alpha1
+kind: MCPAgentSession
+metadata:
+  name: local-session
+  namespace: mcp-servers
+spec:
+  serverRef:
+    name: go-example-mcp
+  subject:
+    humanID: local-user
+    agentID: local-agent
+  consentedTrust: high
+  policyVersion: v1
+EOF
+
+kubectl apply -f /tmp/go-example-access.yaml
+
+until ./bin/mcp-runtime server policy inspect go-example-mcp --namespace mcp-servers | grep -q local-session; do
+  sleep 2
+done
+```
+
+Make a local MCP JSON-RPC request through Traefik and the Sentinel gateway:
+
+```bash
+BASE=http://localhost:18080/go-example-mcp/mcp
+PROTO=2025-06-18
+
+SESSION="$(
+  curl -si \
+    -H "content-type: application/json" \
+    -H "accept: application/json, text/event-stream" \
+    -H "Mcp-Protocol-Version: $PROTO" \
+    -H "X-MCP-Human-ID: local-user" \
+    -H "X-MCP-Agent-ID: local-agent" \
+    -H "X-MCP-Agent-Session: local-session" \
+    -d '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{}}' \
+    "$BASE" | awk -F': ' 'tolower($1)=="mcp-session-id"{print $2}' | tr -d '\r'
+)"
+
+curl -sS \
+  -H "content-type: application/json" \
+  -H "accept: application/json, text/event-stream" \
+  -H "Mcp-Protocol-Version: $PROTO" \
+  -H "Mcp-Session-Id: $SESSION" \
+  -H "X-MCP-Human-ID: local-user" \
+  -H "X-MCP-Agent-ID: local-agent" \
+  -H "X-MCP-Agent-Session: local-session" \
+  -d '{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"add","arguments":{"a":2,"b":3}}}' \
+  "$BASE" | jq .
+```
+
+You should see a successful `tools/call` response containing `5`. Then verify
+Sentinel observed the request:
+
+```bash
+./bin/mcp-runtime sentinel status
+./bin/mcp-runtime sentinel events
+
+UI_API_KEY="$(
+  kubectl get secret mcp-sentinel-secrets -n mcp-sentinel \
+    -o jsonpath='{.data.UI_API_KEY}' | base64 -d
+)"
+
+curl -sS -H "x-api-key: $UI_API_KEY" \
+  http://localhost:18080/api/dashboard/summary | jq .
+```
+
+## 4. Install the platform stack
 
 ```bash
 ./bin/mcp-runtime setup
@@ -65,10 +302,10 @@ Common variants:
 ```bash
 ./bin/mcp-runtime setup --with-tls            # cert-manager TLS for the registry
 ./bin/mcp-runtime setup --without-sentinel    # skip the request-path stack
-./bin/mcp-runtime setup --test-mode           # use kind-loaded operator image
+./bin/mcp-runtime setup --test-mode           # local Kind/dev install path
 ```
 
-## 4. Confirm health
+## 5. Confirm health
 
 ```bash
 ./bin/mcp-runtime status
@@ -77,7 +314,7 @@ Common variants:
 ./bin/mcp-runtime sentinel status
 ```
 
-## 5. Connect your first MCP server
+## 6. Connect your first MCP server
 
 ### Option A — direct manifest
 
@@ -202,7 +439,7 @@ If the server does not come up, stay in the CLI first:
 ./bin/mcp-runtime status
 ```
 
-## 6. Grant governed access (for gateway-enabled servers)
+## 7. Grant governed access (for gateway-enabled servers)
 
 ```yaml
 # grant.yaml
@@ -250,7 +487,7 @@ spec:
 ./bin/mcp-runtime server policy inspect payments
 ```
 
-## 7. Observe live traffic and policy
+## 8. Observe live traffic and policy
 
 ```bash
 ./bin/mcp-runtime sentinel port-forward ui          # Governance + dashboard
