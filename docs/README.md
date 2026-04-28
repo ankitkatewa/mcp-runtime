@@ -20,7 +20,7 @@ MCP Runtime is an open source, Kubernetes-native control plane for deploying, go
   <strong>Core surfaces</strong>
 
   <ul>
-    <li>Operator and <code>MCPServer</code> CRDs</li>
+    <li>Operator and <code>MCPServer</code>, <code>MCPAccessGrant</code>, and <code>MCPAgentSession</code> CRDs</li>
     <li>Registry-backed image build, push, and deploy flow</li>
     <li>Sentinel gateway policy, grants, consented sessions, audit, and analytics</li>
     <li>Governance controls for tool access, trust levels, session revocation, and policy versioning</li>
