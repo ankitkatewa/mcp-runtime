@@ -5,7 +5,8 @@
  */
 
 :root,
-[data-md-color-scheme="default"] {
+[data-md-color-scheme="default"],
+[data-md-color-scheme="slate"] {
   --md-primary-fg-color: #101820;
   --md-primary-bg-color: #ffffff;
   --md-accent-fg-color: #2563eb;
@@ -14,19 +15,19 @@
   --md-default-fg-color--light: #4b5870;
   --md-default-fg-color--lighter: #6b7890;
   --md-code-bg-color: #f8fafc;
-  --md-code-fg-color: #172033;
+  --md-code-fg-color: #1f2937;
   --md-code-hl-color: rgba(37, 99, 235, 0.1);
   --md-code-hl-number-color: #475569;
-  --md-code-hl-special-color: #be185d;
+  --md-code-hl-special-color: #9d174d;
   --md-code-hl-function-color: #1d4ed8;
   --md-code-hl-constant-color: #92400e;
   --md-code-hl-keyword-color: #6d28d9;
   --md-code-hl-string-color: #047857;
-  --md-code-hl-name-color: #172033;
+  --md-code-hl-name-color: #1f2937;
   --md-code-hl-operator-color: #334155;
   --md-code-hl-punctuation-color: #475569;
   --md-code-hl-comment-color: #64748b;
-  --md-code-hl-generic-color: #172033;
+  --md-code-hl-generic-color: #1f2937;
   --md-code-hl-variable-color: #be123c;
   --md-typeset-a-color: #2563eb;
   --md-footer-bg-color: #f7f9fc;
@@ -42,8 +43,8 @@
   --infra-green: #047857;
   --infra-code-bg: #f8fafc;
   --infra-code-bg-soft: #eef2f7;
-  --infra-code-bg-strong: #edf2f7;
-  --infra-code-fg: #172033;
+  --infra-code-bg-strong: #f1f5f9;
+  --infra-code-fg: #1f2937;
   --infra-code-muted: #64748b;
   --infra-code-line: #d8e0eb;
   --infra-mono: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
@@ -233,6 +234,7 @@ body {
 }
 
 .md-typeset .highlight,
+.md-typeset pre,
 .md-typeset pre > code,
 .md-typeset .highlighttable {
   border-radius: 8px;
@@ -240,14 +242,19 @@ body {
 
 .md-typeset .highlight {
   border: 1px solid #dbe3ee;
-  background: var(--infra-code-bg);
+  background: var(--infra-code-bg) !important;
   box-shadow: none;
   overflow: hidden;
 }
 
+.md-typeset pre {
+  background: var(--infra-code-bg) !important;
+  color: var(--infra-code-fg) !important;
+}
+
 .md-typeset pre > code {
-  background: var(--infra-code-bg);
-  color: var(--infra-code-fg);
+  background: var(--infra-code-bg) !important;
+  color: var(--infra-code-fg) !important;
   font-size: 0.76rem;
   line-height: 1.65;
 }
@@ -256,8 +263,8 @@ body {
 .md-typeset .highlight > .filename,
 .md-typeset .highlighttable .filename {
   border-bottom: 1px solid var(--infra-code-line);
-  background: var(--infra-code-bg-strong);
-  color: #334155;
+  background: var(--infra-code-bg-strong) !important;
+  color: #334155 !important;
   font-family: var(--infra-mono);
   font-size: 0.68rem;
   font-weight: 700;
@@ -266,27 +273,27 @@ body {
 
 .md-content__inner > .highlight > .highlighttable > tbody > tr > .filename span.filename,
 .md-typeset .highlighttable .filename span.filename {
-  color: #334155;
+  color: #334155 !important;
 }
 
 .md-content__inner > .highlight > pre > code,
 .md-content__inner > .highlight > .highlighttable > tbody > tr > .code > div > pre > code,
 .md-typeset .highlight pre code,
 .md-typeset .highlighttable .code pre code {
-  background: var(--infra-code-bg);
-  color: var(--infra-code-fg);
+  background: var(--infra-code-bg) !important;
+  color: var(--infra-code-fg) !important;
 }
 
 .md-content__inner > .highlight > .highlighttable > tbody > tr > .linenos,
 .md-typeset .highlighttable .linenos {
   border-right: 1px solid var(--infra-code-line);
-  background: var(--infra-code-bg-soft);
-  color: var(--infra-code-muted);
+  background: var(--infra-code-bg-soft) !important;
+  color: var(--infra-code-muted) !important;
 }
 
 .md-typeset .highlighttable {
   border: 1px solid #dbe3ee;
-  background: var(--infra-code-bg);
+  background: var(--infra-code-bg) !important;
   overflow: hidden;
 }
 
@@ -296,26 +303,97 @@ body {
 
 .md-typeset .highlighttable .linenos pre,
 .md-typeset .highlighttable .linenos code {
-  background: transparent;
-  color: inherit;
+  background: transparent !important;
+  color: inherit !important;
 }
 
 .md-typeset .highlighttable .code {
   width: 100%;
-  background: var(--infra-code-bg);
+  background: var(--infra-code-bg) !important;
 }
 
 .md-typeset .highlight .hll {
-  background-color: var(--md-code-hl-color);
+  background-color: var(--md-code-hl-color) !important;
+}
+
+.md-typeset .highlight,
+.md-typeset .highlight code,
+.md-typeset .highlight pre,
+.md-typeset .highlighttable,
+.md-typeset .highlighttable code,
+.md-typeset .highlighttable pre {
+  color: var(--infra-code-fg) !important;
+}
+
+.md-typeset .highlight .c,
+.md-typeset .highlight .c1,
+.md-typeset .highlight .cm,
+.md-typeset .highlight .cp,
+.md-typeset .highlight .cs,
+.md-typeset .highlight .ch,
+.md-typeset .highlight .sd {
+  color: #64748b !important;
+  font-style: italic;
+}
+
+.md-typeset .highlight .k,
+.md-typeset .highlight .kc,
+.md-typeset .highlight .kd,
+.md-typeset .highlight .kn,
+.md-typeset .highlight .kp,
+.md-typeset .highlight .kr,
+.md-typeset .highlight .kt,
+.md-typeset .highlight .ow {
+  color: #6d28d9 !important;
+  font-weight: 650;
+}
+
+.md-typeset .highlight .s,
+.md-typeset .highlight .s1,
+.md-typeset .highlight .s2,
+.md-typeset .highlight .sb,
+.md-typeset .highlight .sc,
+.md-typeset .highlight .dl,
+.md-typeset .highlight .m,
+.md-typeset .highlight .mi,
+.md-typeset .highlight .mf,
+.md-typeset .highlight .mh,
+.md-typeset .highlight .mo {
+  color: #047857 !important;
+}
+
+.md-typeset .highlight .na,
+.md-typeset .highlight .nb,
+.md-typeset .highlight .nc,
+.md-typeset .highlight .nd,
+.md-typeset .highlight .ne,
+.md-typeset .highlight .nf,
+.md-typeset .highlight .fm,
+.md-typeset .highlight .nt {
+  color: #1d4ed8 !important;
+}
+
+.md-typeset .highlight .nv,
+.md-typeset .highlight .vc,
+.md-typeset .highlight .vg,
+.md-typeset .highlight .vi,
+.md-typeset .highlight .vm {
+  color: #be123c !important;
+}
+
+.md-typeset .highlight .o,
+.md-typeset .highlight .p,
+.md-typeset .highlight .go {
+  color: #475569 !important;
 }
 
 .md-clipboard {
-  color: rgba(51, 65, 85, 0.76);
+  color: rgba(51, 65, 85, 0.76) !important;
 }
 
 .md-clipboard:hover,
 .md-clipboard:focus {
-  color: #1d4ed8;
+  color: #1d4ed8 !important;
 }
 
 .md-typeset table:not([class]) {
