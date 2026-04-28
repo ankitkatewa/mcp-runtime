@@ -80,10 +80,16 @@ The broad install path: runtime namespace, internal registry, operator, ingress 
 mcp-runtime setup
 mcp-runtime setup --with-tls                   # cert-manager TLS for registry
 mcp-runtime setup --without-sentinel           # skip request-path stack
-mcp-runtime setup --test-mode                  # local Kind/dev install path
+mcp-runtime setup --test-mode                  # local Kind/dev build+push path
 ```
 
 Flags: `--registry-type`, `--registry-storage`, `--ingress`, `--ingress-manifest`, `--force-ingress-install`, `--with-tls`, `--test-mode`, `--without-sentinel`, plus operator overrides `--operator-leader-elect`, `--operator-metrics-addr`, `--operator-probe-addr`.
+
+`--test-mode` relaxes production guardrails, but it still builds and pushes the
+operator, gateway proxy, and Sentinel images with `latest` tags to the
+configured or bundled registry. With the bundled plain HTTP registry, cluster
+nodes still need containerd/Docker trust for the exact image host they pull
+from.
 
 ## auth
 

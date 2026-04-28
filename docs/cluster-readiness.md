@@ -80,6 +80,12 @@ Three *different* actors fetch images, and they resolve hostnames differently:
 
 The in-cluster push path is handled by the CLI (`PushInCluster` rewrites the destination to the service DNS). The developer path is your local concern. **The node/kubelet path is what the distribution-specific config below is for.**
 
+`setup --test-mode` still uses this model. It relaxes production guardrails, but
+it builds and pushes the operator, gateway proxy, and Sentinel images with
+`latest` tags to the configured or bundled registry. Those pods still pull
+through kubelet/containerd, so an HTTP bundled registry requires node trust for
+the exact image host and port used in the rendered image references.
+
 ---
 
 ## External registry path
@@ -224,6 +230,18 @@ Runtime workloads only land on pools that have been prepared and audited.
 ## k3s
 
 k3s uses embedded containerd. Point it at the registry NodePort on loopback (same node).
+When using `setup --test-mode` with the bundled plain HTTP registry, the same
+containerd mirror requirement applies because setup still builds and pushes
+operator, gateway proxy, and Sentinel images, then deploys pods that pull those
+images. On k3s hosts where `~/.kube/config` is empty or minimal, pass
+`--kubeconfig /etc/rancher/k3s/k3s.yaml` to setup.
+
+For the bundled registry, setup may choose the registry Service `ClusterIP:port`
+as the pull host and prints it as the registry **Internal URL** after the Service
+exists. If that host was not configured in k3s beforehand, copy the printed value
+into `registries.yaml`, restart k3s/containerd, then rerun setup. To avoid this
+two-step flow, configure a stable external registry or explicit
+`MCP_REGISTRY_ENDPOINT` that every node already trusts.
 
 1. **Registry mirror.** Create `/etc/rancher/k3s/registries.yaml`:
 

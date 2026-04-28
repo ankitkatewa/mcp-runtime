@@ -5,4 +5,4 @@
 - `test/operator_controller_test.go`: higher-level controller assertions against a test environment.
 - `pkg/metadata/loader_test.go`: verifies metadata file loading/defaulting for valid and invalid YAML samples under `pkg/metadata/testdata/`.
 - `test/golden/cli/cli_golden_test.go`: runs CLI commands against golden output files under `test/golden/cli/testdata/*.golden` to prevent regressions.
-- `test/e2e` scripts (`e2e-kind.sh`, `run-in-docker.sh`, `test/e2e/Dockerfile`) outline end-to-end setup flows for CI, building images and running setup against kind.
+- `test/e2e` scripts (`kind.sh`, `run-in-docker.sh`, `test/e2e/Dockerfile`) outline end-to-end setup flows for CI, building and pushing images through the registry flow before running setup against kind.

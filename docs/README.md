@@ -7,7 +7,7 @@ MCP Runtime is an open source, Kubernetes-native control plane for deploying, go
   <div class="docs-hero-copy">
   <p class="docs-eyebrow">Vendor-neutral MCP infrastructure for platform teams</p>
 
-  <p class="docs-lead">Deploy MCP servers, expose them through governed routes, and keep policy, audit, and telemetry attached to every agent call.</p>
+  <p class="docs-lead">Build and publish MCP server images, reconcile them with Kubernetes CRDs, expose them through governed gateway routes, and keep policy, audit, and telemetry attached to every agent call.</p>
 
   <div class="docs-actions">
     <a class="docs-button docs-button-primary" href="getting-started/">Get started</a>
@@ -21,13 +21,43 @@ MCP Runtime is an open source, Kubernetes-native control plane for deploying, go
 
   <ul>
     <li>Operator and <code>MCPServer</code> CRDs</li>
-    <li>Registry-backed build and deploy flow</li>
-    <li>Sentinel gateway policy and analytics</li>
-    <li>CLI for setup, status, grants, sessions, and servers</li>
+    <li>Registry-backed image build, push, and deploy flow</li>
+    <li>Sentinel gateway policy, grants, sessions, audit, and analytics</li>
+    <li>Ingress routing for path-based MCP endpoints</li>
+    <li>CLI for setup, status, registry, access, Sentinel, and servers</li>
   </ul>
   </div>
 </section>
 </div>
+
+## What MCP Runtime installs
+
+`mcp-runtime setup` installs the CRDs, runtime namespaces, an operator, registry
+integration, ingress wiring, and the bundled Sentinel stack. Sentinel includes
+the gateway request path, grant/session policy materialization, analytics
+ingest and processing, dashboard/API services, and observability components.
+
+For local and CI validation, `setup --test-mode` relaxes production guardrails
+but still builds and pushes runtime images. It publishes the operator, gateway
+proxy, and Sentinel service images with `latest` tags to the configured or
+bundled registry, then deploys pods that pull those images.
+
+## Before setup
+
+MCP Runtime expects an already-running Kubernetes cluster. The CLI can apply
+runtime manifests, but it does not configure the node container runtime or host
+DNS. If you use the bundled plain HTTP registry, every node that may schedule
+MCP Runtime pods must trust the exact image host and port used in pod specs.
+On k3s, that usually means an `/etc/rancher/k3s/registries.yaml` mirror for
+`registry.local`, `registry.registry.svc.cluster.local:5000`, or the registry
+Service `ClusterIP:port` such as `10.43.x.x:5000`. On k3s hosts where
+`~/.kube/config` is empty or minimal, pass
+`--kubeconfig /etc/rancher/k3s/k3s.yaml`.
+
+With the bundled registry, setup prints the selected pull host as the registry
+`Internal URL` after the registry Service exists. If that value was not already
+trusted by k3s/containerd, add it to `registries.yaml`, restart k3s, and rerun
+setup.
 
 ## Choose a path
 

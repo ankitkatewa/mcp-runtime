@@ -57,7 +57,9 @@ Sentinel, and operator readiness.
 For local contributor work, use a disposable Kind cluster and `setup
 --test-mode`. This path is for development and CI-style validation: it uses the
 HTTP ingress overlay, avoids public DNS/TLS, and assumes local Docker can build
-the runtime images.
+the runtime images. It does not skip builds: setup builds and pushes the
+operator, gateway proxy, and Sentinel images with `latest` tags to the
+configured or bundled registry.
 
 Create Kind with the registry mirror MCP Runtime expects for image pulls:
 
@@ -116,6 +118,17 @@ For Kind test mode, the usual cause is a cluster created without the
 events include `http: server gave HTTP response to HTTPS client`, the node's
 containerd tried HTTPS against the HTTP dev registry. Configure the insecure
 registry mirror for the exact image host in the pod image reference, or use TLS.
+On k3s with the bundled plain HTTP registry, that exact host may be the registry
+Service `ClusterIP:port` such as `10.43.x.x:5000`; add a matching
+`/etc/rancher/k3s/registries.yaml` mirror and restart k3s. On hosts where
+`~/.kube/config` is empty or minimal, run setup with
+`--kubeconfig /etc/rancher/k3s/k3s.yaml`.
+
+If setup reached image deployment before the k3s mirror was configured, copy
+the registry `Internal URL` from setup output into `registries.yaml`, restart
+k3s/containerd, then rerun setup. The rerun republishes the `latest` images;
+clear partial runtime namespaces first if StatefulSet storage was interrupted
+during the failed run.
 
 ### Test the dashboard, image push, MCP request, and Sentinel
 
@@ -309,7 +322,7 @@ Common variants:
 ```bash
 ./bin/mcp-runtime setup --with-tls            # cert-manager TLS for the registry
 ./bin/mcp-runtime setup --without-sentinel    # skip the request-path stack
-./bin/mcp-runtime setup --test-mode           # local Kind/dev install path
+./bin/mcp-runtime setup --test-mode           # local Kind/dev build+push path
 ```
 
 ## 5. Confirm health

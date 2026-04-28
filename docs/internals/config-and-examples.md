@@ -26,7 +26,7 @@
 
 ## Scripts
 - `hack/dev-setup.sh` automates local dev environment prep (kind cluster, registry, ingress installation, CRD apply) with informative logging.
-- `test/e2e-kind.sh` creates a kind cluster with preloaded images for testing; `test/e2e/run-in-docker.sh` runs e2e flows inside Docker.
+- `test/e2e/kind.sh` creates a kind cluster, builds/pushes test images through the registry flow, and runs e2e validation; `test/e2e/run-in-docker.sh` runs e2e flows inside Docker.
 
 ## Other assets
 - `LICENSE` (MIT), `README.md` project overview, and `Dockerfile.operator`/`Makefile.operator` referenced above.

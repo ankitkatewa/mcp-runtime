@@ -104,9 +104,9 @@ This package implements the `mcp-runtime` CLI commands. Each subsection walks th
 
 ## setup.go
 - L1-L25: imports, constants, and `defaultRegistrySecretName` for provisioned registry credentials.
-- L27-L63: `NewSetupCmd` wires the top-level `setup` command with flags for registry type/storage, ingress mode/manifest, TLS overlay, and test mode.
-- L65-L152: `setupPlatform` executes the end-to-end setup: prints steps, loads external registry config, initializes cluster (`initCluster`), configures ingress (`configureCluster`), deploys registry (internal or external login), waits for readiness, shows registry info, builds/pushes runtime images for the selected registry path, deploys operator manifests, configures provisioned registry env on operator, restarts deployment, verifies setup, and prints success.
-- L154-L205: `getOperatorImage` picks a default operator image (local tag or provisioned registry override) depending on external registry/test mode flags.
+- `NewSetupCmd` wires the top-level `setup` command with flags for registry type/storage, ingress mode/manifest, TLS overlay, kubeconfig/context, and test mode.
+- `setupPlatform` executes the end-to-end setup: prints steps, loads registry config, initializes the cluster, configures ingress, deploys or uses a registry, publishes runtime images, deploys operator and Sentinel manifests, verifies setup, and prints success.
+- In `--test-mode`, setup sets `MCP_RUNTIME_TEST_MODE=1`, so `setupImageTag` returns `latest`; it still builds and pushes the operator, gateway proxy, and Sentinel images to the configured or bundled registry instead of skipping builds.
 - L207-L257: `deployOperatorManifests` uses kustomize to render operator manifests, substitutes the operator image, applies them via `kubectl`, and patches the deployment image when needed.
 - L259-L293: `restartDeployment` triggers a rollout restart on the operator deployment to pick up env changes.
 - L295-L333: `verifySetup` calls `checkClusterStatus` and `checkRegistryStatus`, ensuring registry ingress routes resolve; on external registry, it requires external config.
