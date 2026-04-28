@@ -1,13 +1,13 @@
 # MCP Runtime
 
-MCP Runtime is an open source, Kubernetes-native control plane for deploying, governing, and brokering MCP servers. It packages server deployment, registry workflows, gateway routing, access policy, audit, and observability into one operating surface for platform teams.
+MCP Runtime is an open source, Kubernetes-native control plane for deploying, governing, and brokering MCP servers. It packages server deployment, registry workflows, gateway routing, access policy, audit evidence, and observability into one operating surface for platform, security, and compliance teams.
 
 <div class="docs-home">
 <section class="docs-hero">
   <div class="docs-hero-copy">
   <p class="docs-eyebrow">Vendor-neutral MCP infrastructure for platform teams</p>
 
-  <p class="docs-lead">Build and publish MCP server images, reconcile them with Kubernetes CRDs, expose them through governed gateway routes, and keep policy, audit, and telemetry attached to every agent call.</p>
+  <p class="docs-lead">Build and publish MCP server images, reconcile them with Kubernetes CRDs, expose them through governed gateway routes, and keep policy decisions, consented sessions, audit trails, and telemetry attached to every agent call.</p>
 
   <div class="docs-actions">
     <a class="docs-button docs-button-primary" href="getting-started/">Get started</a>
@@ -22,7 +22,9 @@ MCP Runtime is an open source, Kubernetes-native control plane for deploying, go
   <ul>
     <li>Operator and <code>MCPServer</code> CRDs</li>
     <li>Registry-backed image build, push, and deploy flow</li>
-    <li>Sentinel gateway policy, grants, sessions, audit, and analytics</li>
+    <li>Sentinel gateway policy, grants, consented sessions, audit, and analytics</li>
+    <li>Governance controls for tool access, trust levels, session revocation, and policy versioning</li>
+    <li>Compliance-oriented event records for who called what, when, against which server, and whether it was allowed or denied</li>
     <li>Ingress routing for path-based MCP endpoints</li>
     <li>CLI for setup, status, registry, access, Sentinel, and servers</li>
   </ul>
@@ -41,6 +43,19 @@ For local and CI validation, `setup --test-mode` relaxes production guardrails
 but still builds and pushes runtime images. It publishes the operator, gateway
 proxy, and Sentinel service images with `latest` tags to the configured or
 bundled registry, then deploys pods that pull those images.
+
+## Governance, audit, and compliance
+
+MCP Runtime keeps governance on the live request path instead of leaving it as
+out-of-band documentation. The gateway evaluates `MCPAccessGrant` and
+`MCPAgentSession` policy before tool calls reach a server, including tool-level
+allow/deny rules, trust requirements, consented trust, expiry, and revocation.
+
+Each decision can emit audit and analytics events with the server, namespace,
+human ID, agent ID, session ID, tool name, policy version, decision, reason, and
+trust context. That gives platform and security teams a queryable record for
+reviewing access, investigating denied calls, and preparing compliance evidence
+for governed agent workflows.
 
 ## Before setup
 
