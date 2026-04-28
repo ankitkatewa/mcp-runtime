@@ -86,8 +86,8 @@ EOF
 
 kind create cluster --name mcp-runtime --config /tmp/mcp-runtime-kind.yaml
 ./bin/mcp-runtime bootstrap                              # preflight cluster prerequisites
-./bin/mcp-runtime cluster doctor                         # registry/node readiness
 MCP_SETUP_WAIT_TIMEOUT=900 ./bin/mcp-runtime setup --test-mode --ingress-manifest config/ingress/overlays/http
+./bin/mcp-runtime cluster doctor                         # post-install registry/component diagnostics
 kubectl port-forward -n traefik svc/traefik 18080:8000   # expose ingress
 ```
 

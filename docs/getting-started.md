@@ -33,7 +33,6 @@ This produces `./bin/mcp-runtime`.
 
 ```bash
 ./bin/mcp-runtime bootstrap
-./bin/mcp-runtime cluster doctor
 ```
 
 Before setup, confirm the target Kubernetes cluster is ready for registry
@@ -49,8 +48,9 @@ with your platform tooling before continuing.
 `bootstrap` validates kubectl connectivity, CoreDNS, the default
 `StorageClass`, Traefik `IngressClass`, and MetalLB namespace. Warnings only —
 fix gaps with your platform tooling, or `bootstrap --apply --provider k3s` to
-install bundled CoreDNS / local-path on k3s. `cluster doctor` adds
-distribution-specific registry and node readiness checks.
+install bundled CoreDNS / local-path on k3s. After setup, run `cluster doctor`
+to validate the installed MCP Runtime resources, registry pulls, ingress,
+Sentinel, and operator readiness.
 
 ## 3. Contributor test-mode cluster
 
@@ -75,14 +75,13 @@ kind create cluster --name mcp-runtime --config /tmp/mcp-runtime-kind.yaml
 kubectl config use-context kind-mcp-runtime
 ```
 
-Build the CLI, run the readiness checks, and install the stack in test mode:
+Build the CLI, run bootstrap, and install the stack in test mode:
 
 ```bash
 make deps
 make build
 
 ./bin/mcp-runtime bootstrap
-./bin/mcp-runtime cluster doctor
 
 MCP_SETUP_WAIT_TIMEOUT=900 \
   ./bin/mcp-runtime setup --test-mode \
@@ -96,9 +95,14 @@ Confirm the install and expose the local dashboard/gateway:
 ./bin/mcp-runtime cluster status
 ./bin/mcp-runtime registry status
 ./bin/mcp-runtime sentinel status
+./bin/mcp-runtime cluster doctor
 
 kubectl port-forward -n traefik svc/traefik 18080:8000
 ```
+
+`cluster doctor` is most useful after setup because it validates the installed
+MCP Runtime components, registry pulls, ingress, Sentinel, and operator
+readiness. On a fresh cluster before setup, those resources do not exist yet.
 
 Local URLs:
 
@@ -108,7 +112,10 @@ Local URLs:
 
 If pods report `ImagePullBackOff`, run `./bin/mcp-runtime cluster doctor`.
 For Kind test mode, the usual cause is a cluster created without the
-`registry.registry.svc.cluster.local:5000` mirror to `127.0.0.1:32000`.
+`registry.registry.svc.cluster.local:5000` mirror to `127.0.0.1:32000`. If pod
+events include `http: server gave HTTP response to HTTPS client`, the node's
+containerd tried HTTPS against the HTTP dev registry. Configure the insecure
+registry mirror for the exact image host in the pod image reference, or use TLS.
 
 ### Test the dashboard, image push, MCP request, and Sentinel
 

@@ -1,10 +1,10 @@
 package cli
 
-// This file implements the "cluster doctor" preflight command.
-// It detects the Kubernetes distribution, checks that platform prerequisites
-// (registry service, in-cluster DNS for registry.local) are in place, and
-// prints distribution-specific remediation when they aren't. See
-// docs/cluster-readiness.md for the full list of per-distribution prereqs.
+// This file implements the "cluster doctor" diagnostics command.
+// It detects the Kubernetes distribution, checks installed MCP Runtime
+// components and registry image-pull health, and prints distribution-specific
+// remediation when something is wrong. See docs/cluster-readiness.md for the
+// full list of per-distribution prerequisites.
 
 import (
 	"encoding/base64"
@@ -48,6 +48,8 @@ const (
 	doctorTraefikWebPort      = 8000
 	doctorSentinelNamespace   = "mcp-sentinel"
 	doctorSentinelAPIService  = "mcp-sentinel-api"
+
+	registryHTTPPullMismatch = "http: server gave HTTP response to HTTPS client"
 )
 
 // AllOK reports whether every check passed.
@@ -63,9 +65,9 @@ func (r DoctorReport) AllOK() bool {
 func (m *ClusterManager) newClusterDoctorCmd() *cobra.Command {
 	return &cobra.Command{
 		Use:   "doctor",
-		Short: "Preflight: verify the cluster is ready for mcp-runtime setup",
+		Short: "Diagnose MCP Runtime cluster readiness and installed components",
 		Long: "Detect the Kubernetes distribution and check that the registry service, cluster DNS, " +
-			"operator/CRD prerequisites, and ingress (Traefik) wiring are in place. Prints remediation steps for your distribution " +
+			"operator/CRD prerequisites, ingress (Traefik) wiring, image pulls, Sentinel, and MCPServer reconciliation are healthy. Prints remediation steps for your distribution " +
 			"when something is missing. See docs/cluster-readiness.md for the full per-distribution checklist.",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			report := RunDoctor(m.kubectl)
@@ -78,7 +80,7 @@ func (m *ClusterManager) newClusterDoctorCmd() *cobra.Command {
 	}
 }
 
-// RunDoctor executes all preflight checks and returns a report.
+// RunDoctor executes cluster diagnostics and returns a report.
 func RunDoctor(kubectl KubectlRunner) DoctorReport {
 	distro := DetectDistribution(kubectl)
 	return DoctorReport{
@@ -101,6 +103,7 @@ func RunDoctor(kubectl KubectlRunner) DoctorReport {
 			checkRegistryReachableFromCluster(kubectl),
 			checkMCPServersImagePullSecrets(kubectl, doctorMCPServersNamespace),
 			checkMCPServersImagePullSmoke(kubectl, doctorMCPServersNamespace),
+			checkRegistryHTTPPullMismatch(kubectl),
 			checkSentinelSecrets(kubectl),
 			checkSentinelAPIAuthProbe(kubectl),
 			checkNodeCapacity(kubectl),
@@ -1122,6 +1125,87 @@ func checkPendingPodsByNamespace(kubectl KubectlRunner) DoctorCheck {
 	}
 }
 
+type imagePullPodCandidate struct {
+	Namespace string
+	Name      string
+	Images    []string
+	Reasons   []string
+}
+
+func checkRegistryHTTPPullMismatch(kubectl KubectlRunner) DoctorCheck {
+	out, err := readKubectlOutput(kubectl, []string{"get", "pods", "-A", "-o", `jsonpath={range .items[*]}{.metadata.namespace}{"|"}{.metadata.name}{"|"}{range .spec.containers[*]}{.image}{","}{end}{"|"}{range .status.containerStatuses[*]}{.state.waiting.reason}{","}{end}{"\n"}{end}`})
+	if err != nil {
+		return DoctorCheck{
+			Name:   "registry HTTP pull mismatch",
+			OK:     false,
+			Detail: fmt.Sprintf("kubectl error: %v", err),
+			Remedy: "check API connectivity and RBAC for listing pods",
+		}
+	}
+
+	candidates := parseImagePullCandidates(out)
+	if len(candidates) == 0 {
+		return DoctorCheck{
+			Name:   "registry HTTP pull mismatch",
+			OK:     true,
+			Detail: "no ErrImagePull/ImagePullBackOff pods detected",
+		}
+	}
+
+	for _, candidate := range candidates {
+		describe, err := readKubectlOutput(kubectl, []string{"describe", "pod", candidate.Name, "-n", candidate.Namespace})
+		if err != nil {
+			continue
+		}
+		if !strings.Contains(describe, registryHTTPPullMismatch) {
+			continue
+		}
+		return DoctorCheck{
+			Name:   "registry HTTP pull mismatch",
+			OK:     false,
+			Detail: fmt.Sprintf("pod %s/%s image %s failed pull: %s", candidate.Namespace, candidate.Name, firstNonEmpty(candidate.Images, "unknown"), registryHTTPPullMismatch),
+			Remedy: "Registry HTTP pull mismatch: kubelet tried HTTPS against the HTTP registry. Configure the node/containerd insecure registry or Kind mirror for the exact image host, or use TLS.",
+		}
+	}
+
+	return DoctorCheck{
+		Name:   "registry HTTP pull mismatch",
+		OK:     true,
+		Detail: fmt.Sprintf("%d ErrImagePull/ImagePullBackOff pod(s) found, none with HTTP-vs-HTTPS registry mismatch events", len(candidates)),
+	}
+}
+
+func parseImagePullCandidates(value string) []imagePullPodCandidate {
+	var candidates []imagePullPodCandidate
+	for _, line := range filterNonEmptyLines(value) {
+		parts := strings.SplitN(line, "|", 4)
+		if len(parts) != 4 {
+			continue
+		}
+		reasons := splitCommaTrim(parts[3])
+		if !hasImagePullReason(reasons) {
+			continue
+		}
+		candidates = append(candidates, imagePullPodCandidate{
+			Namespace: strings.TrimSpace(parts[0]),
+			Name:      strings.TrimSpace(parts[1]),
+			Images:    splitCommaTrim(parts[2]),
+			Reasons:   reasons,
+		})
+	}
+	return candidates
+}
+
+func hasImagePullReason(reasons []string) bool {
+	for _, reason := range reasons {
+		switch strings.TrimSpace(reason) {
+		case "ErrImagePull", "ImagePullBackOff":
+			return true
+		}
+	}
+	return false
+}
+
 func checkMCPServerReconcileSmoke(kubectl KubectlRunner, namespace string) DoctorCheck {
 	image := "registry.k8s.io/pause:3.9"
 	imageSource := "fixed smoke image registry.k8s.io/pause:3.9"
@@ -1247,6 +1331,15 @@ func splitCommaTrim(value string) []string {
 		}
 	}
 	return out
+}
+
+func firstNonEmpty(values []string, fallback string) string {
+	for _, value := range values {
+		if trimmed := strings.TrimSpace(value); trimmed != "" {
+			return trimmed
+		}
+	}
+	return fallback
 }
 
 func filterNonEmptyLines(value string) []string {

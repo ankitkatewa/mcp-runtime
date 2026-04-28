@@ -302,6 +302,88 @@ func TestCheckRegistryReachableFromCluster(t *testing.T) {
 	})
 }
 
+func TestParseImagePullCandidates(t *testing.T) {
+	out := strings.Join([]string{
+		"mcp-sentinel|mcp-sentinel-api-abc|10.96.64.95:5000/mcp-sentinel-api:latest,|ImagePullBackOff,",
+		"mcp-runtime|operator-abc|registry.registry.svc.cluster.local:5000/mcp-runtime-operator:latest,|Running,",
+		"registry|registry-abc|registry.local/distribution:latest,|ErrImagePull,",
+	}, "\n")
+
+	candidates := parseImagePullCandidates(out)
+	if len(candidates) != 2 {
+		t.Fatalf("expected 2 image pull candidates, got %d", len(candidates))
+	}
+	if candidates[0].Namespace != "mcp-sentinel" || candidates[0].Name != "mcp-sentinel-api-abc" {
+		t.Fatalf("unexpected first candidate: %#v", candidates[0])
+	}
+	if candidates[0].Images[0] != "10.96.64.95:5000/mcp-sentinel-api:latest" {
+		t.Fatalf("expected ClusterIP registry image, got %q", candidates[0].Images[0])
+	}
+	if candidates[1].Images[0] != "registry.local/distribution:latest" {
+		t.Fatalf("expected host registry image, got %q", candidates[1].Images[0])
+	}
+}
+
+func TestCheckRegistryHTTPPullMismatch(t *testing.T) {
+	t.Run("reports HTTP registry mismatch from describe pod events", func(t *testing.T) {
+		pods := "mcp-sentinel|mcp-sentinel-api-abc|10.96.64.95:5000/mcp-sentinel-api:latest,|ImagePullBackOff,\n"
+		describe := `Name:             mcp-sentinel-api-abc
+Namespace:        mcp-sentinel
+Events:
+  Type     Reason     Age   From               Message
+  ----     ------     ----  ----               -------
+  Warning  Failed     31s   kubelet            Failed to pull image "10.96.64.95:5000/mcp-sentinel-api:latest": failed to resolve reference "10.96.64.95:5000/mcp-sentinel-api:latest": failed to do request: Head "https://10.96.64.95:5000/v2/mcp-sentinel-api/manifests/latest": http: server gave HTTP response to HTTPS client
+`
+		mock := &MockExecutor{
+			CommandFunc: func(spec ExecSpec) *MockCommand {
+				switch {
+				case contains(spec.Args, "pods") && contains(spec.Args, "-A"):
+					return &MockCommand{OutputData: []byte(pods)}
+				case contains(spec.Args, "describe"):
+					return &MockCommand{OutputData: []byte(describe)}
+				default:
+					return &MockCommand{}
+				}
+			},
+		}
+		kubectl := &KubectlClient{exec: mock, validators: nil}
+		check := checkRegistryHTTPPullMismatch(kubectl)
+		if check.OK {
+			t.Fatal("expected registry HTTP mismatch to fail")
+		}
+		for _, want := range []string{"mcp-sentinel/mcp-sentinel-api-abc", "10.96.64.95:5000/mcp-sentinel-api:latest", registryHTTPPullMismatch} {
+			if !strings.Contains(check.Detail, want) {
+				t.Fatalf("detail should contain %q, got %q", want, check.Detail)
+			}
+		}
+		for _, want := range []string{"insecure registry", "containerd", "exact image host"} {
+			if !strings.Contains(check.Remedy, want) {
+				t.Fatalf("remedy should contain %q, got %q", want, check.Remedy)
+			}
+		}
+	})
+
+	t.Run("passes when pull failures do not include HTTP mismatch event", func(t *testing.T) {
+		pods := "mcp-servers|demo-abc|registry.local/demo:latest,|ErrImagePull,\n"
+		describe := `Events:
+  Warning  Failed  kubelet  Failed to pull image "registry.local/demo:latest": not found
+`
+		mock := &MockExecutor{
+			CommandFunc: func(spec ExecSpec) *MockCommand {
+				if contains(spec.Args, "describe") {
+					return &MockCommand{OutputData: []byte(describe)}
+				}
+				return &MockCommand{OutputData: []byte(pods)}
+			},
+		}
+		kubectl := &KubectlClient{exec: mock, validators: nil}
+		check := checkRegistryHTTPPullMismatch(kubectl)
+		if !check.OK {
+			t.Fatalf("expected OK when no HTTP mismatch event exists, got detail=%q", check.Detail)
+		}
+	})
+}
+
 func TestRunDoctorAggregates(t *testing.T) {
 	mock := &MockExecutor{
 		CommandFunc: func(spec ExecSpec) *MockCommand {

@@ -368,7 +368,7 @@ kubectl run -n registry --rm -it registry-check --restart=Never \
 curl -s http://127.0.0.1:32000/v2/_catalog
 getent hosts registry.local
 
-# Preflight check via the CLI (see below)
+# Post-install diagnostics via the CLI (see below)
 ./bin/mcp-runtime cluster doctor
 ```
 
@@ -377,7 +377,7 @@ getent hosts registry.local
 | Symptom | Likely cause | What to check |
 |---|---|---|
 | `lookup registry.local: no such host` during publish or image pull | Host or node DNS does not know `registry.local` | `/etc/hosts`, corporate DNS, `MCP_REGISTRY_INGRESS_HOST`, and the image host emitted by generated manifests |
-| `server gave HTTP response to HTTPS client` | The registry is HTTP, but Docker/containerd is trying HTTPS | Insecure registry / mirror settings for dev, or switch to HTTPS with trusted certs for production |
+| `http: server gave HTTP response to HTTPS client` | The registry is HTTP, but Docker/containerd is trying HTTPS | Insecure registry / mirror settings for the exact image host in dev, or switch to HTTPS with trusted certs for production |
 | `ImagePullBackOff` with `401` or `403` | Registry auth is missing or invalid | Image pull secrets, service account references, workload identity, or cloud node registry permissions |
 | `ImagePullBackOff` only on some nodes | Node pool config drift | Registry mirror config, CA trust, DNS, and registry permissions on every eligible node pool |
 | `curl https://registry.<domain>/v2/` returns Traefik `404 page not found` | Ingress/router is not routing to the registry service | Registry `Ingress`, ingress class, Traefik logs, host rules, and TLS secret names |
@@ -400,11 +400,13 @@ Missing pieces are warnings, not errors — the command surfaces them so you can
 
 ## `cluster doctor`
 
-`./bin/mcp-runtime cluster doctor` runs a preflight:
+`./bin/mcp-runtime cluster doctor` runs post-install diagnostics:
 
 - Detects your distribution (k3s / kind / minikube / docker-desktop / generic).
-- Checks the registry Service is present and has a NodePort.
-- Verifies `registry.local` resolves from inside the cluster (cluster DNS).
+- Checks the installed MCP Runtime namespaces, CRDs, operator, Traefik ingress, registry, Sentinel, and MCPServer reconciliation path.
+- Verifies registry reachability, registry image-pull smoke behavior, and common pod image-pull failures.
+- Reports `http: server gave HTTP response to HTTPS client` when kubelet/containerd tried HTTPS against the HTTP dev registry, including the affected pod and image where possible.
 - Prints the distribution-specific remediation checklist from this document.
 
-Run it before `setup` on a fresh cluster, or when debugging `ImagePullBackOff`.
+Run `bootstrap` before `setup` on a fresh cluster. Run `cluster doctor` after
+setup, or when debugging `ImagePullBackOff` on an installed MCP Runtime stack.
