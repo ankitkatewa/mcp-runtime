@@ -1045,6 +1045,10 @@ const (
 	DefaultIngressClass = "traefik"
 	// DefaultIngressPathType is the default path type for ingress rules.
 	DefaultIngressPathType = "Prefix"
+	// IngressReadinessModeStrict requires Ingress.status.loadBalancer.ingress to be populated.
+	IngressReadinessModeStrict = "strict"
+	// IngressReadinessModePermissive treats an Ingress with rules as ready when LB status is absent.
+	IngressReadinessModePermissive = "permissive"
 )
     Ingress configuration.
 
@@ -1088,6 +1092,13 @@ var DefaultOperatorConfig = LoadOperatorConfig()
     DefaultOperatorConfig is the default configuration loaded at startup.
 
 
+FUNCTIONS
+
+func NormalizeIngressReadinessMode(value string) (string, bool)
+    NormalizeIngressReadinessMode returns a supported ingress readiness mode.
+    Empty or invalid values fall back to strict mode.
+
+
 TYPES
 
 type MCPServerReconciler struct {
@@ -1096,6 +1107,9 @@ type MCPServerReconciler struct {
 
 	// DefaultIngressHost is the default ingress host if not specified in the CR.
 	DefaultIngressHost string
+
+	// IngressReadinessMode controls how ingress readiness is evaluated.
+	IngressReadinessMode string
 
 	// ProvisionedRegistry holds the provisioned registry configuration.
 	// If nil or URL is empty, provisioned registry features are disabled.
@@ -1124,6 +1138,9 @@ type OperatorConfig struct {
 
 	// DefaultIngressClass is the ingress class to use.
 	DefaultIngressClass string
+
+	// IngressReadinessMode controls how ingress readiness is evaluated.
+	IngressReadinessMode string
 
 	// ProvisionedRegistryURL is the URL of the provisioned registry.
 	ProvisionedRegistryURL string
@@ -1637,6 +1654,7 @@ type CLIConfig struct {
 	OperatorImage             string // Override for operator image
 	GatewayProxyImage         string // Optional default image for the MCP gateway sidecar
 	AnalyticsIngestURL        string // Optional analytics ingest URL override for the MCP gateway sidecar
+	IngressReadinessMode      string // Optional operator ingress readiness mode: strict or permissive
 	ClusterName               string // Optional cluster label attached to analytics/audit events
 
 	// Server defaults
