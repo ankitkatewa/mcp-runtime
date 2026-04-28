@@ -1,9 +1,60 @@
-# cmd/mcp-runtime/main.go
+# CLI Entrypoint
 
-- L1: declares the `main` package so the file builds to a binary.
-- L3-L11: imports standard IO/OS plus `cobra` for CLI wiring and `zap` for logging, pulling CLI commands from `internal/cli`.
-- L13-L17: version metadata variables (`version`, `commit`, `date`) defaulted for local builds and typically set at link time.
-- L19-L33: `main()` builds a console logger, aborts on failure, defers sync, registers all subcommands via `initCommands`, and executes the Cobra root command; errors are printed to stderr and exit non-zero.
-- L35-L48: `rootCmd` defines the Cobra root with usage text, a multi-line description of the platform management focus, and a version string that includes build metadata.
-- L50-L57: `initCommands` attaches the cluster, registry, server, access, bootstrap, setup, status, sentinel, and pipeline subcommands (nine total) provided by `internal/cli` packages using the shared logger.
-- L60-L82: `newConsoleLogger` creates a `zap` production config tuned for human console output (console encoding, warn level, ISO timestamps, colored levels, no caller/stack info) and directs output to stdout/stderr.
+Package `cmd/mcp-runtime` builds the user-facing `mcp-runtime` binary. It should
+stay thin: initialize logging, assemble Cobra commands, execute the root command,
+and exit with a clear status.
+
+Useful reference command:
+
+```bash
+go doc -cmd ./cmd/mcp-runtime
+```
+
+## Responsibilities
+
+- Define build metadata variables (`version`, `commit`, `date`) that release
+  builds can set with linker flags.
+- Create the root Cobra command and global flags.
+- Register subcommands from `internal/cli`.
+- Configure a console-oriented zap logger.
+- Print command errors to stderr and return a non-zero process exit.
+
+The entrypoint should not contain business logic for setup, registry, server,
+access, or Sentinel behavior. Put that logic in `internal/cli` so it can be
+tested without invoking the whole binary.
+
+## Command Tree
+
+The root command wires these internal command groups:
+
+| Command | Owner package |
+|---|---|
+| `bootstrap` | `internal/cli/bootstrap.go` |
+| `cluster` | `internal/cli/cluster.go` and `cluster_doctor.go` |
+| `setup` | `internal/cli/setup.go`, `setup_plan.go`, `setup_steps.go` |
+| `status` | `internal/cli/status.go` |
+| `registry` | `internal/cli/registry.go` |
+| `server` | `internal/cli/server.go`, `build.go` |
+| `pipeline` | `internal/cli/pipeline.go` |
+| `access` | `internal/cli/access.go` |
+| `sentinel` | `internal/cli/sentinel.go` |
+
+When adding a command, wire it here only after the implementation has focused
+package tests and help text is ready for golden snapshots.
+
+## Contributor Contract
+
+CLI UX changes should preserve these expectations:
+
+- Help text is accurate and reflected in `test/golden/cli/testdata`.
+- Errors are human-readable and still return non-zero exit codes.
+- Logs are readable in terminals and CI.
+- Global flags stay minimal; feature-specific flags belong on their command.
+- Commands that shell out to external tools are testable through runner
+  abstractions in `internal/cli`.
+
+Before changing this package, run:
+
+```bash
+go test ./cmd/mcp-runtime ./internal/cli/... ./test/golden/... -count=1
+```

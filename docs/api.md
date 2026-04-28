@@ -321,4 +321,4 @@ GET /api/events/filter?server=payments&decision=deny&agent_id=ops-agent&limit=50
 
 - [Sentinel](sentinel.md) — what each HTTP surface above maps to.
 - [Architecture](architecture.md) — how requests flow through the gateway.
-- [internals/api-types.md](internals/api-types.md) — file-level walkthrough of the CRD type sources.
+- [internals/api-types.md](internals/api-types.md) — contributor-oriented guide to the CRD Go types and generated API contract.

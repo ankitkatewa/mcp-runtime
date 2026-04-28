@@ -1,14 +1,3 @@
-/*
-Let me share the flow of the code:
-1. fetch the MCPServer object
-2. apply the defaults if needed
-3. validate the ingress config
-4. reconcile the resources
-5. check the resource readiness
-6. determine the phase
-7. update the status
-8. return the result
-*/
 package operator
 
 import (

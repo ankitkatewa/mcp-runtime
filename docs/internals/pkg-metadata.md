@@ -1,25 +1,86 @@
-# pkg/metadata
+# Metadata Package
 
-## schema.go
-- L1: Declares `package metadata` defining the in-memory representation of MCP server metadata files.
-- L3-L46: `ServerMetadata` struct describes required/optional fields (name, image, tag, route, ports, replicas, resources, env vars, namespace) with YAML/JSON tags for serialization.
-- L48-L56: `ResourceRequirements` wrapper for optional limit/request maps.
-- L58-L63: `ResourceList` holding CPU and memory strings.
-- L65-L70: `EnvVar` struct for name/value pairs.
-- L72-L81: `RegistryFile` root struct containing metadata file version and list of server entries.
+Package `pkg/metadata` supports the `.mcp` authoring flow. It loads lightweight
+server metadata files, applies defaults, resolves registry hosts, and renders
+`MCPServer` manifests.
 
-## loader.go
-- L1: Package declaration and imports for filesystem/YAML parsing utilities.
-- L9-L26: `LoadFromFile` reads a YAML file into `RegistryFile`, applies per-server defaults via `setDefaults`, and returns the populated struct.
-- L28-L55: `LoadFromDirectory` loads all `.yaml`/`.yml` files in a directory, aggregates servers from each file, and returns a combined registry (version `v1`).
-- L57-L88: `setDefaults` fills missing fields on `ServerMetadata`: default image pointing at the internal registry, default tag `latest`, route prefixed with `/`, port `8088`, replicas `1`, and namespace `mcp-servers`.
+Refresh the package reference with:
 
-## crd_generator.go
-- L1: Package declaration and imports for file IO, YAML, and API types.
-- L11-L49: `GenerateCRD` converts a single `ServerMetadata` entry into an MCPServer CRD object, setting type/meta, namespace, spec fields, ingress path, default service port, resources, and env vars, then marshals to YAML.
-- L51-L70: Ensures the output directory exists and writes the YAML manifest to the requested path.
-- L72-L85: `GenerateCRDsFromRegistry` walks all servers in a registry and emits one CRD YAML per server into an output directory, creating it if missing.
+```bash
+go doc -all ./pkg/metadata
+```
 
-## Tests
-- `loader_test.go` validates defaulting and error handling for both file and directory loading paths.
-- `schema.go` is also exercised indirectly through generator and loader tests.
+## Metadata Schema
+
+`RegistryFile` is the root document:
+
+```yaml
+version: v1
+servers:
+  - name: demo
+    image: registry.local/demo
+    imageTag: latest
+```
+
+`ServerMetadata` mirrors the parts of `MCPServerSpec` that contributors commonly
+author by hand:
+
+- image and tag
+- route, ingress host, and public path prefix
+- container port and replicas
+- resources
+- literal and secret-backed env vars
+- namespace
+- tools, prompts, resources, and tasks
+- auth, policy, session, gateway, analytics, and rollout config
+
+Keep this schema aligned with `api/v1alpha1.MCPServerSpec`. If a new CRD field
+should be available in `.mcp` files, add it here, map it in the generator, and
+cover it with loader/generator tests.
+
+## Loading and Defaults
+
+`LoadFromFile` reads one YAML file and applies defaults. `LoadFromDirectory`
+aggregates all `.yaml` and `.yml` files in a directory into one registry.
+
+Defaulting currently fills:
+
+- registry-backed image when image is absent
+- `latest` tag when image tag is absent
+- route shape when route is absent
+- default port `8088`
+- one replica
+- namespace `mcp-servers`
+
+Default image host resolution is environment-aware. `ResolveRegistryHost`,
+`ResolveRegistryEndpoint`, `ResolveMcpIngressHost`, and
+`ResolvePlatformIngressHost` use `MCP_REGISTRY_*`, `MCP_PLATFORM_DOMAIN`, and
+related env vars to keep generated manifests pullable and routable.
+
+## Manifest Generation
+
+`GenerateCRD` converts one `ServerMetadata` into an `MCPServer` YAML manifest.
+`GenerateCRDsFromRegistry` writes one manifest per server to an output directory.
+
+Generation should be deterministic:
+
+- input metadata plus environment should fully determine output
+- output filenames should remain stable
+- omitted optional fields should stay omitted unless defaults are intentional
+- generated YAML should match the API contract, not CLI-only assumptions
+
+## Contributor Workflow
+
+When changing metadata behavior:
+
+1. Update `pkg/metadata` schema and generator mapping.
+2. Add or update fixtures in `pkg/metadata/testdata` when useful.
+3. Update user docs for `.mcp` authoring if the field is user-facing.
+4. Check examples that rely on generated manifests.
+
+Run:
+
+```bash
+go test ./pkg/metadata/... -count=1
+go test ./internal/cli -run 'TestPipeline|TestBuild' -count=1
+```

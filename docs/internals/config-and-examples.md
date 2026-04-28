@@ -1,13 +1,13 @@
 # Config, Examples, and Supporting Assets
 
 ## config/
-- `config/crd/bases/mcp.agent-hellboy.io_mcpservers.yaml` defines the MCPServer CRD with schema, printer columns, and validation; used by kubectl apply during setup.
-- `config/default/kustomization.yaml` kustomize entry assembling manager, RBAC, CRD, and webhook assets for operator deployment.
-- `config/manager` holds the controller-manager Deployment and PodDisruptionBudget manifests; `manager.yaml` sets image placeholder, args, probes, and RBAC subjects.
-- `config/rbac` contains service account, role, and role binding definitions used by the operator.
-- `config/ingress` provides base Traefik ingress controller manifests and overlays (`http`, `prod`, `dev`) to install ingress with different args/ports.
-- `config/registry` contains manifests to deploy the internal Docker registry (namespace, deployment, service, pvc, ingress) plus a TLS overlay with ingress/secret adjustments.
-- `config/cert-manager` offers sample cert-manager issuer/certificate for securing registry ingress.
+- `config/crd/bases/` contains generated CRDs for `MCPServer`, `MCPAccessGrant`, and `MCPAgentSession`. Regenerate them with `make -f Makefile.operator generate manifests` after API type changes.
+- `config/default/` is the Kustomize entrypoint for operator deployment assets.
+- `config/manager/` holds the controller-manager Deployment and PodDisruptionBudget manifests.
+- `config/rbac/` contains service account, role, and binding definitions used by the operator.
+- `config/ingress/` provides Traefik ingress controller manifests and overlays, including the HTTP dev overlay used by local and e2e setup.
+- `config/registry/` contains the bundled Docker distribution registry manifests plus TLS/hostpath overlays.
+- `config/cert-manager/` contains sample issuer/certificate resources for registry and ingress TLS.
 
 ## examples/
 - `go-mcp-server/` is the primary sample server used by smoke/e2e flows.
