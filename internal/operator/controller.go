@@ -461,7 +461,7 @@ func determinePhase(readiness resourceReadiness) (string, bool) {
 
 func (r *MCPServerReconciler) setDefaults(mcpServer *mcpv1alpha1.MCPServer) {
 	// Only set a default tag if the image doesn't already contain one.
-	if mcpServer.Spec.ImageTag == "" && !strings.Contains(mcpServer.Spec.Image, ":") && !strings.Contains(mcpServer.Spec.Image, "@") {
+	if mcpServer.Spec.ImageTag == "" && !imageHasTagOrDigest(mcpServer.Spec.Image) {
 		mcpServer.Spec.ImageTag = "latest"
 	}
 	if mcpServer.Spec.Replicas == nil {
@@ -858,7 +858,7 @@ func (r *MCPServerReconciler) resolveImage(ctx context.Context, mcpServer *mcpv1
 
 	image := mcpServer.Spec.Image
 	// Append tag only if the image does not already include a tag or digest.
-	if mcpServer.Spec.ImageTag != "" && !strings.Contains(image, ":") && !strings.Contains(image, "@") {
+	if mcpServer.Spec.ImageTag != "" && !imageHasTagOrDigest(image) {
 		image = fmt.Sprintf("%s:%s", image, mcpServer.Spec.ImageTag)
 	}
 
@@ -1276,6 +1276,16 @@ func rewriteRegistry(image, registry string) string {
 		parts = parts[1:]
 	}
 	return fmt.Sprintf("%s/%s", registry, strings.Join(parts, "/"))
+}
+
+func imageHasTagOrDigest(image string) bool {
+	if strings.Contains(image, "@") {
+		return true
+	}
+
+	lastSlash := strings.LastIndex(image, "/")
+	lastColon := strings.LastIndex(image, ":")
+	return lastColon > lastSlash
 }
 
 func (r *MCPServerReconciler) buildImagePullSecrets(mcpServer *mcpv1alpha1.MCPServer) []corev1.LocalObjectReference {

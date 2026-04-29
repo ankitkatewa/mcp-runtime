@@ -27,7 +27,7 @@ make build
 ./bin/mcp-runtime auth login --api-url https://platform.example.com --token-stdin < token.txt
 ./bin/mcp-runtime auth status
 
-./bin/mcp-runtime registry push --image my-server:v1.0.0
+./bin/mcp-runtime registry push --image <resolved-registry-host>/my-server:v1.0.0
 ./bin/mcp-runtime pipeline generate --dir .mcp --output manifests/
 ./bin/mcp-runtime pipeline deploy --dir manifests/
 ```
@@ -168,9 +168,9 @@ mcp-runtime registry provision \
   --operator-image registry.example.com/mcp-runtime-operator:latest
 
 # Push images (default mode is in-cluster helper pod)
-mcp-runtime registry push --image payments:v1
-mcp-runtime registry push --image payments:v1 --mode direct
-mcp-runtime registry push --image payments:v1 --name payments-api
+mcp-runtime registry push --image <resolved-registry-host>/payments:v1
+mcp-runtime registry push --image <resolved-registry-host>/payments:v1 --mode direct
+mcp-runtime registry push --image <resolved-registry-host>/payments:v1 --name payments-api
 ```
 
 ## pipeline
@@ -224,12 +224,12 @@ mcp-runtime server logs payments --follow
 
 # Build (push lives under registry)
 mcp-runtime server build image payments --tag v1
-mcp-runtime registry push --image payments:v1
+mcp-runtime registry push --image <resolved-registry-host>/payments:v1
 ```
 
 `server patch` accepts inline `--patch` or `--patch-file` with `merge`, `json`, or `strategic` modes.
 
-`server build image` updates matching `.mcp` metadata when you use the metadata-driven pipeline. It does not deploy by itself; push and deploy are separate steps.
+`server build image` updates matching `.mcp` metadata when you use the metadata-driven pipeline. It does not deploy by itself; push and deploy are separate steps. Push the exact full image reference emitted by build/metadata, not a shortened local image name.
 
 ## sentinel
 
@@ -288,7 +288,7 @@ mcp-runtime setup
 
 # Push a server image
 mcp-runtime server build image payments
-mcp-runtime registry push --image payments:latest
+mcp-runtime registry push --image <resolved-registry-host>/payments:latest
 
 # Deploy from metadata
 mcp-runtime pipeline generate --dir .mcp --output manifests

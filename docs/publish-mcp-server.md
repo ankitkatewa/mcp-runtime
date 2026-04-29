@@ -148,14 +148,16 @@ This command builds a Docker image and updates the matching metadata entry. It i
 Then push the image:
 
 ```bash
-./bin/mcp-runtime registry push --image payments:v1.0.0
+./bin/mcp-runtime registry push --image <resolved-registry-host>/payments:v1.0.0
 ```
+
+Use the exact image reference produced by `server build image` (or written into `.mcp` as `image` + `imageTag`). Do not assume a short local name like `payments:v1.0.0`.
 
 Typical user flow:
 
 ```bash
 docker build -t payments:v1.0.0 .
-./bin/mcp-runtime registry push --image payments:v1.0.0
+./bin/mcp-runtime registry push --image <resolved-registry-host>/payments:v1.0.0
 ./bin/mcp-runtime server apply --file payments.yaml
 ```
 
@@ -163,7 +165,7 @@ Or, with metadata:
 
 ```bash
 ./bin/mcp-runtime server build image payments --tag v1.0.0
-./bin/mcp-runtime registry push --image payments:v1.0.0
+./bin/mcp-runtime registry push --image <resolved-registry-host>/payments:v1.0.0
 ./bin/mcp-runtime pipeline generate --dir .mcp --output manifests/
 ./bin/mcp-runtime pipeline deploy --dir manifests/
 ```
@@ -202,6 +204,13 @@ Check server state:
 ./bin/mcp-runtime status
 ```
 
+Confirm the applied server image settings from the CLI:
+
+```bash
+./bin/mcp-runtime server get payments
+./bin/mcp-runtime server status
+```
+
 If the server uses governed access:
 
 ```bash
@@ -224,7 +233,8 @@ Check:
 
 - the `spec.image` and `spec.imageTag` in your manifest
 - the metadata entry updated by `server build image`
-- whether you pushed the same tag you applied
+- the generated manifest under `manifests/` before deploy
+- whether the live Deployment image exactly matches the built image reference
 
 ### Image pushed, but server never becomes ready
 
