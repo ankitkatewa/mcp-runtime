@@ -49,11 +49,10 @@ platform looks after deployment. It is not a place for companies to list or sell
 products; it is a way to evaluate the governed control-plane model before
 installing it.
 
-As of April 2026, based on the currently visible open-source MCP ecosystem, MCP
-Runtime appears to fill a gap: an open-source MCP platform that combines a
-deployable Kubernetes runtime, brokered request path, access/session model,
-registry workflow, audit pipeline, and operational control surface in one
-system.
+As of April 2026, we have not found another open-source MCP product that
+combines a deployable Kubernetes runtime, registry workflow, brokered request
+path, access/session model, audit pipeline, and operational control surface in
+one system.
 
 ## Control Plane
 

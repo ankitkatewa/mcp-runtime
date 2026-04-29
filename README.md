@@ -7,9 +7,9 @@
 [![Coverage](https://codecov.io/gh/Agent-Hellboy/mcp-runtime/branch/main/graph/badge.svg)](https://codecov.io/gh/Agent-Hellboy/mcp-runtime/branch/main)
 [![Go Report Card](https://goreportcard.com/badge/github.com/Agent-Hellboy/mcp-runtime)](https://goreportcard.com/report/github.com/Agent-Hellboy/mcp-runtime)
 
-MCP Runtime is a self-hosted Kubernetes control plane for internal Model Context Protocol servers. It provides declarative MCP server deployment, registry workflows, operator reconciliation, request-path governance, access/session resources, audit, analytics, dashboards, and a platform control surface for operating MCP servers.
+MCP Runtime is a self-hosted Kubernetes control plane for internal Model Context Protocol servers. It provides declarative MCP server deployment, registry workflows, operator reconciliation, request-path governance, access/session resources, audit, analytics, dashboards, and a platform control surface for browsing and operating MCP servers.
 
-The public platform at `platform.mcpruntime.org` is a live preview of the deployable platform experience. It is not a public or private marketplace for MCP servers. Companies can deploy the same model in their own Kubernetes clusters and use it to host, manage, govern, and audit MCP servers for agents, IDEs, and direct human workflows.
+The public platform at `platform.mcpruntime.org` is a live preview of the deployable platform experience. It is not a public or private marketplace for MCP servers. Companies can deploy the same model in their own Kubernetes clusters, then host, manage, govern, and audit MCP servers through both the CLI and the platform control surface for agents, IDEs, and direct human workflows.
 
 - Website: https://mcpruntime.org/
 - Platform: https://platform.mcpruntime.org/ for a preview of the platform control surface; companies can deploy the same model in their own clusters
@@ -39,7 +39,7 @@ Public MCP directories and catalogs such as Glama, Smithery, Docker MCP Catalog,
 | Usually runs as a third-party hosted directory or client feature | Runs in the company's Kubernetes environment or in a hosted preview shape |
 | Stops at configuration or connection | Owns the governed request path through the broker/gateway |
 
-As of April 2026, we have not found another open-source MCP product that combines a deployable Kubernetes control plane, registry workflow, brokered request path, access/session model, audit path, and operational UI in one package.
+As of April 2026, we have not found another open-source MCP product that combines a deployable Kubernetes control plane, registry workflow, brokered request path, access/session model, audit pipeline, and operational control surface in one package.
 
 ## Requirements
 
