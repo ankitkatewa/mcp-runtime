@@ -119,6 +119,9 @@ func (r *MCPServerReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 		return ctrl.Result{Requeue: true}, nil
 	}
 
+	if err := r.validateMCPServerSpec(ctx, mcpServer, logger); err != nil {
+		return ctrl.Result{Requeue: false}, err
+	}
 	if err := r.validateIngressConfig(ctx, mcpServer, logger); err != nil {
 		return ctrl.Result{Requeue: false}, err
 	}
@@ -172,22 +175,30 @@ func (r *MCPServerReconciler) applyDefaultsIfNeeded(ctx context.Context, mcpServ
 	return true, nil
 }
 
-func (r *MCPServerReconciler) validateIngressConfig(ctx context.Context, mcpServer *mcpv1alpha1.MCPServer, logger logr.Logger) error {
+func (r *MCPServerReconciler) validateMCPServerSpec(ctx context.Context, mcpServer *mcpv1alpha1.MCPServer, logger logr.Logger) error {
 	if _, err := mcpServer.ValidateCreate(); err != nil {
 		r.updateStatus(ctx, mcpServer, "Error", err.Error(), resourceReadiness{})
-		logOperatorError(logger, err, "Invalid ingress configuration")
+		logOperatorError(logger, err, "Invalid MCPServer specification")
 		return err
 	}
 	return nil
 }
 
-func (r *MCPServerReconciler) validateGatewayConfig(ctx context.Context, mcpServer *mcpv1alpha1.MCPServer, logger logr.Logger) error {
-	if _, err := mcpServer.ValidateCreate(); err != nil {
-		r.updateStatus(ctx, mcpServer, "Error", err.Error(), resourceReadiness{})
-		logOperatorError(logger, err, "Invalid gateway configuration")
-		return err
+func (r *MCPServerReconciler) validateIngressConfig(ctx context.Context, mcpServer *mcpv1alpha1.MCPServer, logger logr.Logger) error {
+	if strings.TrimSpace(mcpServer.Spec.PublicPathPrefix) == "" {
+		if err := r.requireSpecField(ctx, mcpServer, logger, "ingress path", effectiveIngressPath(mcpServer),
+			"ingressPath is required; set spec.ingressPath or ensure metadata.name is set"); err != nil {
+			return err
+		}
+		if err := r.requireSpecField(ctx, mcpServer, logger, "ingress host", effectiveIngressHost(mcpServer),
+			"ingressHost is required; set spec.ingressHost, set MCP_DEFAULT_INGRESS_HOST on the operator, or use spec.publicPathPrefix for hostless routing"); err != nil {
+			return err
+		}
 	}
+	return nil
+}
 
+func (r *MCPServerReconciler) validateGatewayConfig(ctx context.Context, mcpServer *mcpv1alpha1.MCPServer, logger logr.Logger) error {
 	if gatewayEnabled(mcpServer) {
 		if _, err := r.resolveGatewayImage(mcpServer); err != nil {
 			r.updateStatus(ctx, mcpServer, "Error", err.Error(), resourceReadiness{})
@@ -314,9 +325,12 @@ func determinePhase(readiness resourceReadiness) (string, bool) {
 }
 
 func (r *MCPServerReconciler) setDefaults(mcpServer *mcpv1alpha1.MCPServer) {
+	ingressHostUnset := strings.TrimSpace(mcpServer.Spec.IngressHost) == ""
+	publicPathPrefixUnset := strings.TrimSpace(mcpServer.Spec.PublicPathPrefix) == ""
+
 	mcpServer.Default()
 
-	if strings.TrimSpace(mcpServer.Spec.IngressHost) == "" && strings.TrimSpace(mcpServer.Spec.PublicPathPrefix) == "" {
+	if ingressHostUnset && publicPathPrefixUnset {
 		mcpServer.Spec.IngressHost = strings.TrimSpace(r.DefaultIngressHost)
 	}
 

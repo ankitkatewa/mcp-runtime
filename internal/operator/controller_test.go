@@ -157,7 +157,7 @@ func TestBuildGatewayContainerAppliesDefaultResources(t *testing.T) {
 	}
 }
 
-func TestValidateGatewayConfigRejectsInvalidRolloutValues(t *testing.T) {
+func TestValidateMCPServerSpecRejectsInvalidRolloutValues(t *testing.T) {
 	scheme := runtime.NewScheme()
 	if err := mcpv1alpha1.AddToScheme(scheme); err != nil {
 		t.Fatalf("AddToScheme() error = %v", err)
@@ -195,7 +195,7 @@ func TestValidateGatewayConfigRejectsInvalidRolloutValues(t *testing.T) {
 		Scheme: scheme,
 	}
 
-	err := reconciler.validateGatewayConfig(context.Background(), server, logr.Discard())
+	err := reconciler.validateMCPServerSpec(context.Background(), server, logr.Discard())
 	if err == nil {
 		t.Fatal("expected rollout validation error")
 	}
@@ -204,7 +204,7 @@ func TestValidateGatewayConfigRejectsInvalidRolloutValues(t *testing.T) {
 	}
 }
 
-func TestValidateGatewayConfigRequiresOAuthIssuer(t *testing.T) {
+func TestValidateMCPServerSpecRequiresOAuthIssuer(t *testing.T) {
 	scheme := runtime.NewScheme()
 	if err := mcpv1alpha1.AddToScheme(scheme); err != nil {
 		t.Fatalf("AddToScheme() error = %v", err)
@@ -240,7 +240,7 @@ func TestValidateGatewayConfigRequiresOAuthIssuer(t *testing.T) {
 		Scheme: scheme,
 	}
 
-	err := reconciler.validateGatewayConfig(context.Background(), server, logr.Discard())
+	err := reconciler.validateMCPServerSpec(context.Background(), server, logr.Discard())
 	if err == nil {
 		t.Fatal("expected oauth issuer validation error")
 	}
