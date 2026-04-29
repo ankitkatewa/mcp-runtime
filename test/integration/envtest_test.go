@@ -238,6 +238,7 @@ func testReconcileAppliesDefaults(t *testing.T, cfg *rest.Config, scheme *runtim
 		Spec: mcpv1alpha1.MCPServerSpec{
 			Image:       "nginx",
 			IngressHost: "defaults.example.com",
+			IngressPath: "/defaults-test/mcp",
 		},
 	}
 
