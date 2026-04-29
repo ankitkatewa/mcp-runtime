@@ -231,7 +231,7 @@ mcp-runtime registry push --image <exact-image-ref-from-build>
 
 `server patch` accepts inline `--patch` or `--patch-file` with `merge`, `json`, or `strategic` modes.
 
-`server build image` updates matching `.mcp` metadata when you use the metadata-driven pipeline. It can resolve to a concrete host such as `10.43.109.51:5000/payments:v1`; push that exact ref. The command does not deploy by itself; push and deploy are separate steps.
+`server build image` updates matching `.mcp` metadata when you use the metadata-driven pipeline. It can resolve to a concrete host such as `10.43.109.51:5000/payments:v1`. Push that exact ref. The command does not deploy by itself; push and deploy are separate steps.
 
 ## sentinel
 
