@@ -8,13 +8,15 @@
       <p class="lede">
         MCP Runtime gives platform teams one place to deploy, route, govern, and observe
         Model Context Protocol servers. Define services once, enforce policy on the live
-        request path, and give AI agents a controlled way to reach internal tools.
+        request path, and give AI agents, IDE users, and direct human workflows a
+        controlled way to reach internal tools.
       </p>
       <p class="lede">
         The public entrypoint at <a href="{{ platform_url }}">platform.mcpruntime.org</a>
-        shows the marketplace-style experience. When a company deploys MCP Runtime in its
-        own cluster, it gets that same platform model on infrastructure it controls across
-        vendor-neutral Kubernetes distributions.
+        is not a public or private marketplace. It is a live preview of the control
+        surface companies get when they deploy MCP Runtime in their own cluster:
+        easy deployment, governed access, brokered execution, audit, compliance
+        evidence, and operations on infrastructure they control.
       </p>
       <div class="hero-actions" aria-label="Primary actions">
         <a class="button primary" href="{{ platform_url }}">Open hosted platform</a>
@@ -121,7 +123,7 @@ spec:
       </article>
       <article class="feature-card">
         <h3>Hosted platform shape</h3>
-        <p>The public <code>platform.mcpruntime.org</code> experience works like a shared MCP marketplace, and the same surface can be deployed privately per company cluster.</p>
+        <p>The public <code>platform.mcpruntime.org</code> experience shows how the platform looks after deployment. It is a product preview, not a vendor storefront, listing site, or MCP marketplace.</p>
       </article>
       <article class="feature-card">
         <h3>Brokered tool calls</h3>
@@ -142,9 +144,38 @@ spec:
     </div>
   </section>
 
+  <section class="container pillars" aria-labelledby="market-title">
+    <div class="section-heading span-two">
+      <span class="section-label">04 / Position</span>
+      <h2 id="market-title">More than discovery.</h2>
+      <p>
+        Public MCP directories such as Glama, Smithery, Docker MCP Catalog, PulseMCP,
+        mcp.so, and client-specific catalogs help people discover or install MCP servers.
+        MCP Runtime is different: it is an open-source runtime platform for companies
+        that need to host, deploy, govern, audit, and operate MCP servers inside their
+        own Kubernetes environment.
+      </p>
+    </div>
+    <article>
+      <span class="card-index">D</span>
+      <h3>Deployment first</h3>
+      <p>Define MCP servers as Kubernetes resources and let the platform handle routes, rollouts, registry wiring, and status.</p>
+    </article>
+    <article>
+      <span class="card-index">E</span>
+      <h3>Open source runtime</h3>
+      <p>As of April 2026, we have not found another open-source MCP product that combines a deployable Kubernetes control plane, registry workflow, brokered request path, access/session model, audit pipeline, and operational control surface.</p>
+    </article>
+    <article>
+      <span class="card-index">F</span>
+      <h3>Governed by design</h3>
+      <p>Companies can manage MCP access for agents, IDEs, and humans with grants, sessions, policy decisions, and audit evidence.</p>
+    </article>
+  </section>
+
   <section class="container runbook" aria-labelledby="runbook-title">
     <div class="section-heading">
-      <span class="section-label">04 / Runbook</span>
+      <span class="section-label">05 / Runbook</span>
       <h2 id="runbook-title">Install the stack, then connect servers.</h2>
     </div>
     <ol class="runbook-steps">
@@ -169,7 +200,7 @@ spec:
 
   <section class="container use-cases" aria-labelledby="use-cases-title">
     <div class="section-heading">
-      <span class="section-label">05 / Use Cases</span>
+      <span class="section-label">06 / Use Cases</span>
       <h2 id="use-cases-title">Where companies put it to work.</h2>
     </div>
     <div class="use-cases-grid">
@@ -178,12 +209,12 @@ spec:
         <p>Expose internal tools to agents with controlled access, request inspection, and audit trails.</p>
       </article>
       <article class="use-case">
-        <h3>Internal MCP catalog</h3>
-        <p>Give teams a shared place to publish, discover, and operate MCP servers instead of one-off sidecars.</p>
+        <h3>Internal MCP operations</h3>
+        <p>Give teams a shared control surface to publish, operate, govern, and inspect MCP servers instead of one-off sidecars.</p>
       </article>
       <article class="use-case">
-        <h3>Private MCP marketplace</h3>
-        <p>Mirror the public platform experience inside a company cluster so teams browse approved MCP servers without depending on a third-party control plane.</p>
+        <h3>Private platform preview</h3>
+        <p>Use the public platform to understand the deployed product, then run the same control surface inside a company cluster for owned MCP servers.</p>
       </article>
       <article class="use-case">
         <h3>Cross-team governance</h3>
@@ -198,7 +229,7 @@ spec:
 
   <section class="container platforms" aria-labelledby="platforms-title">
     <div class="section-heading compact">
-      <span class="section-label">06 / Targets</span>
+      <span class="section-label">07 / Targets</span>
       <h2 id="platforms-title">Runs where your company already runs Kubernetes.</h2>
       <p>Kubernetes 1.25+. Self-hosted. Open source. Vendor-neutral across Kubernetes distributions. No proprietary control plane.</p>
     </div>
@@ -216,8 +247,8 @@ spec:
 
   <section class="container cta-band" aria-labelledby="cta-title">
     <span class="section-label">Next action</span>
-    <h2 id="cta-title">Try the hosted platform, then run the same model yourself.</h2>
-    <p>Open the public platform, then install MCP Runtime in your own cluster to give your company the same marketplace-style control surface with private infrastructure underneath.</p>
+    <h2 id="cta-title">Preview the platform, then run it yourself.</h2>
+    <p>Open the public platform to see the control surface. Install MCP Runtime to give your company that same experience on private infrastructure, with governance and audit built into the runtime path.</p>
     <div class="hero-actions">
       <a class="button primary" href="{{ platform_url }}">Open platform.mcpruntime.org</a>
       <a class="button primary" href="{{ docs_url }}getting-started/">Open install guide</a>
