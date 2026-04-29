@@ -147,7 +147,7 @@ After this command, push the exact image reference produced by the build output 
 ./bin/mcp-runtime registry push --image <exact-image-ref-from-build>
 ```
 
-`<exact-image-ref-from-build>` may be something like `10.43.109.51:5000/payments:v1.0.0`.
+`<exact-image-ref-from-build>` may be a resolved registry endpoint such as `10.43.109.51:5000/payments:v1.0.0`.
 
 Then generate and deploy from metadata:
 
