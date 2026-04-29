@@ -1,13 +1,15 @@
 # MCP Runtime
 
-MCP Runtime is an open source, Kubernetes-native control plane for deploying, governing, and brokering MCP servers. It packages server deployment, registry workflows, gateway routing, access policy, audit evidence, and observability into one operating surface for platform, security, and compliance teams.
+MCP Runtime is an open-source, Kubernetes-native control plane for deploying, governing, and brokering MCP servers. It packages server deployment, registry workflows, gateway routing, access policy, audit evidence, and observability into one operating surface for platform, security, and compliance teams.
 
 Unlike public MCP directories or client-specific catalogs, MCP Runtime is not
-just a place to discover servers. The UI is the front door to a deployable
-platform: internal server catalog, Kubernetes reconciliation, registry workflow,
-brokered tool calls, access grants, consented sessions, audit, and operational
+just a place to discover servers, and it is not a marketplace for MCP listings.
+The platform control surface is the front door to a deployable runtime:
+Kubernetes reconciliation, registry workflow, brokered tool calls, access
+grants, consented sessions, audit, compliance evidence, and operational
 visibility. The hosted platform shows what that experience looks like; companies
-can run the same model inside their own clusters.
+can run the same model inside their own clusters for agents, IDEs, and direct
+human workflows.
 
 <div class="docs-home">
 <section class="docs-hero">
@@ -51,19 +53,20 @@ ingest and processing, dashboard/API services, and observability components.
 Top MCP directories and catalogs such as Glama, Smithery, Docker MCP Catalog,
 PulseMCP, mcp.so, and client-specific catalogs are useful for public discovery,
 metadata, install snippets, or client onboarding. MCP Runtime is different: it
-is an open source control plane for operating governed MCP servers inside a
+is an open-source control plane for operating governed MCP servers inside a
 company environment.
 
 | Others usually provide | MCP Runtime provides |
 |---|---|
-| Public discovery and categories | Internal server catalog plus deployable runtime |
+| Public discovery and categories | Deployable runtime plus an internal server view when teams need one |
 | Install snippets and connection docs | Kubernetes `MCPServer` reconciliation and routes |
-| Popularity or metadata signals | Trust, grants, sessions, policy decisions, and audit |
+| Popularity or metadata signals | Trust, grants, sessions, policy decisions, audit, and compliance evidence |
 | Hosted directory or client-specific UX | Self-hosted, vendor-neutral Kubernetes control plane |
 
-We have not found another open source MCP product that combines server
-discovery with the deployable Kubernetes operator, registry workflow, brokered
-request path, access/session model, and audit pipeline in one system.
+As of April 2026, we have not found another open-source MCP product that
+combines a deployable Kubernetes operator, registry workflow, brokered request
+path, access/session model, audit pipeline, and operational control surface in
+one system.
 
 ## Governance, audit, and compliance
 

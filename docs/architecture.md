@@ -30,28 +30,30 @@ flowchart LR
 
 ## Market Position
 
-MCP Runtime should be compared with MCP directories and catalogs, but it is not
-trying to be a listing site. Products such as Glama, Smithery, Docker MCP Catalog,
-PulseMCP, mcp.so, and client-specific catalogs are strongest at public
-discovery, metadata, installation snippets, or client onboarding. MCP Runtime
-uses a platform UI as the front door to a deployable runtime platform.
+MCP Runtime can be compared with MCP directories and catalogs, but it is not
+trying to be a listing site or marketplace. Products such as Glama, Smithery,
+Docker MCP Catalog, PulseMCP, mcp.so, and client-specific catalogs are strongest
+at public discovery, metadata, installation snippets, or client onboarding. MCP
+Runtime uses a platform control surface as the front door to a deployable
+runtime platform.
 
 | Market category | Typical scope | MCP Runtime difference |
 |---|---|---|
-| Public MCP directories | Search, categories, public server metadata, install snippets. | Adds a deployable Kubernetes control plane, internal server catalog, registry workflow, broker, policy, and audit path. |
+| Public MCP directories | Search, categories, public server metadata, install snippets. | Adds a deployable Kubernetes control plane, registry workflow, broker, policy, audit path, and operational control surface. |
 | Client catalogs | One-click install inside a specific MCP client. | Stays client-neutral and governs server access before tool calls reach the workload. |
 | Hosted registry/control-plane products | Hosted discovery, connectors, gateway, or publisher workflows. | Can run in the company's cluster with CRDs, operator reconciliation, and private infrastructure ownership. |
-| Container/catalog products | Trusted images, runtime packaging, and client connection profiles. | Extends beyond packaging into access grants, consented sessions, policy decisions, and compliance-oriented event history. |
+| Container/catalog products | Trusted images, runtime packaging, and client connection profiles. | Extends beyond packaging into access grants, consented sessions, policy decisions, audit evidence, and compliance-oriented event history. |
 
 The public `platform.mcpruntime.org` surface is therefore a preview of how the
 platform looks after deployment. It is not a place for companies to list or sell
 products; it is a way to evaluate the governed control-plane model before
 installing it.
 
-Based on the currently visible open source MCP ecosystem, MCP Runtime appears to
-fill a gap: an open source MCP platform that combines server discovery with the
+As of April 2026, based on the currently visible open-source MCP ecosystem, MCP
+Runtime appears to fill a gap: an open-source MCP platform that combines a
 deployable Kubernetes runtime, brokered request path, access/session model,
-registry workflow, and audit pipeline in one system.
+registry workflow, audit pipeline, and operational control surface in one
+system.
 
 ## Control Plane
 
