@@ -1484,6 +1484,7 @@ func TestReconcile(t *testing.T) {
 			Spec: mcpv1alpha1.MCPServerSpec{
 				Image:       "test-image",
 				IngressHost: "example.com",
+				IngressPath: "/test-server/mcp",
 			},
 		}
 		client := fake.NewClientBuilder().WithScheme(scheme).WithObjects(mcpServer).Build()

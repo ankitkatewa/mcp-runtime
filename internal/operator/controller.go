@@ -110,6 +110,10 @@ func (r *MCPServerReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 
 	logger.Info("Reconciling MCPServer", "name", mcpServer.Name, "namespace", mcpServer.Namespace)
 
+	if err := r.validateMCPServerSpec(ctx, mcpServer, logger); err != nil {
+		return ctrl.Result{Requeue: false}, err
+	}
+
 	// Set defaults and update spec only if changed
 	requeue, err := r.applyDefaultsIfNeeded(ctx, mcpServer, logger)
 	if err != nil {
@@ -119,9 +123,6 @@ func (r *MCPServerReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 		return ctrl.Result{Requeue: true}, nil
 	}
 
-	if err := r.validateMCPServerSpec(ctx, mcpServer, logger); err != nil {
-		return ctrl.Result{Requeue: false}, err
-	}
 	if err := r.validateIngressConfig(ctx, mcpServer, logger); err != nil {
 		return ctrl.Result{Requeue: false}, err
 	}
