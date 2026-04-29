@@ -131,44 +131,42 @@ Generate and deploy manifests:
 
 ## Build and push the server image
 
-For the direct manifest path, build the image with your normal container workflow:
+MCP Runtime supports two practical image flows. Keep these flows separate so tags stay consistent.
 
-```bash
-docker build -t payments:v1.0.0 .
-```
-
-For the metadata-driven path, use the CLI helper:
+### Flow A — metadata-driven build with the CLI
 
 ```bash
 ./bin/mcp-runtime server build image payments --tag v1.0.0
 ```
 
-This command builds a Docker image and updates the matching metadata entry. It is meant for the `.mcp` pipeline flow.
+`server build image` builds the image, resolves the target registry host, tags the local image with that resolved reference, and rewrites matching `.mcp` metadata (`image` and `imageTag`).
 
-Then push the image:
+After this command, push the exact image reference produced by the build output (or read it from the rewritten metadata):
 
 ```bash
-./bin/mcp-runtime registry push --image <resolved-registry-host>/payments:v1.0.0
+./bin/mcp-runtime registry push --image <exact-image-ref-from-build>
 ```
 
-Use the exact image reference produced by `server build image` (or written into `.mcp` as `image` + `imageTag`). Do not assume a short local name like `payments:v1.0.0`.
+`<exact-image-ref-from-build>` may be a resolved registry endpoint such as `10.43.109.51:5000/payments:v1.0.0`.
 
-Typical user flow:
-
-```bash
-docker build -t payments:v1.0.0 .
-./bin/mcp-runtime registry push --image <resolved-registry-host>/payments:v1.0.0
-./bin/mcp-runtime server apply --file payments.yaml
-```
-
-Or, with metadata:
+Then generate and deploy from metadata:
 
 ```bash
-./bin/mcp-runtime server build image payments --tag v1.0.0
-./bin/mcp-runtime registry push --image <resolved-registry-host>/payments:v1.0.0
 ./bin/mcp-runtime pipeline generate --dir .mcp --output manifests/
 ./bin/mcp-runtime pipeline deploy --dir manifests/
 ```
+
+### Flow B — manual Docker build, then push
+
+Use this when you manage image tags directly and apply `MCPServer` manifests yourself:
+
+```bash
+docker build -t payments:v1.0.0 .
+./bin/mcp-runtime registry push --image payments:v1.0.0
+./bin/mcp-runtime server apply --file payments.yaml
+```
+
+Short names like `payments:v1.0.0` are valid only when that exact local image tag exists.
 
 ## What happens after deploy
 
@@ -204,13 +202,6 @@ Check server state:
 ./bin/mcp-runtime status
 ```
 
-Confirm the applied server image settings from the CLI:
-
-```bash
-./bin/mcp-runtime server get payments
-./bin/mcp-runtime server status
-```
-
 If the server uses governed access:
 
 ```bash
@@ -233,8 +224,7 @@ Check:
 
 - the `spec.image` and `spec.imageTag` in your manifest
 - the metadata entry updated by `server build image`
-- the generated manifest under `manifests/` before deploy
-- whether the live Deployment image exactly matches the built image reference
+- whether you pushed the exact same image reference (registry/repo/tag) that your metadata or manifest points to
 
 ### Image pushed, but server never becomes ready
 

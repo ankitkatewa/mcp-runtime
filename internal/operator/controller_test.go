@@ -157,7 +157,7 @@ func TestBuildGatewayContainerAppliesDefaultResources(t *testing.T) {
 	}
 }
 
-func TestValidateGatewayConfigRejectsInvalidRolloutValues(t *testing.T) {
+func TestValidateMCPServerSpecRejectsInvalidRolloutValues(t *testing.T) {
 	scheme := runtime.NewScheme()
 	if err := mcpv1alpha1.AddToScheme(scheme); err != nil {
 		t.Fatalf("AddToScheme() error = %v", err)
@@ -170,9 +170,10 @@ func TestValidateGatewayConfigRejectsInvalidRolloutValues(t *testing.T) {
 			Namespace: "default",
 		},
 		Spec: mcpv1alpha1.MCPServerSpec{
-			Image:    "example.com/server",
-			Replicas: &replicas,
-			Port:     DefaultPort,
+			Image:            "example.com/server",
+			Replicas:         &replicas,
+			Port:             DefaultPort,
+			PublicPathPrefix: "gateway-server",
 			Gateway: &mcpv1alpha1.GatewayConfig{
 				Enabled: true,
 				Port:    defaultGatewayPort,
@@ -194,7 +195,7 @@ func TestValidateGatewayConfigRejectsInvalidRolloutValues(t *testing.T) {
 		Scheme: scheme,
 	}
 
-	err := reconciler.validateGatewayConfig(context.Background(), server, logr.Discard())
+	err := reconciler.validateMCPServerSpec(context.Background(), server, logr.Discard())
 	if err == nil {
 		t.Fatal("expected rollout validation error")
 	}
@@ -203,7 +204,7 @@ func TestValidateGatewayConfigRejectsInvalidRolloutValues(t *testing.T) {
 	}
 }
 
-func TestValidateGatewayConfigRequiresOAuthIssuer(t *testing.T) {
+func TestValidateMCPServerSpecRequiresOAuthIssuer(t *testing.T) {
 	scheme := runtime.NewScheme()
 	if err := mcpv1alpha1.AddToScheme(scheme); err != nil {
 		t.Fatalf("AddToScheme() error = %v", err)
@@ -215,8 +216,9 @@ func TestValidateGatewayConfigRequiresOAuthIssuer(t *testing.T) {
 			Namespace: "default",
 		},
 		Spec: mcpv1alpha1.MCPServerSpec{
-			Image: "example.com/server",
-			Port:  DefaultPort,
+			Image:            "example.com/server",
+			Port:             DefaultPort,
+			PublicPathPrefix: "gateway-server",
 			Gateway: &mcpv1alpha1.GatewayConfig{
 				Enabled: true,
 				Port:    defaultGatewayPort,
@@ -238,7 +240,7 @@ func TestValidateGatewayConfigRequiresOAuthIssuer(t *testing.T) {
 		Scheme: scheme,
 	}
 
-	err := reconciler.validateGatewayConfig(context.Background(), server, logr.Discard())
+	err := reconciler.validateMCPServerSpec(context.Background(), server, logr.Discard())
 	if err == nil {
 		t.Fatal("expected oauth issuer validation error")
 	}
@@ -277,7 +279,7 @@ func TestSetDefaults(t *testing.T) {
 		}
 		r.setDefaults(&mcpServer)
 		assertEqual(t, "publicPathPrefix", mcpServer.Spec.PublicPathPrefix, "test-server")
-		assertEqual(t, "ingressHost", mcpServer.Spec.IngressHost, "")
+		assertEqual(t, "ingressHost", mcpServer.Spec.IngressHost, "example.com")
 	})
 
 	t.Run("preserves explicit publicPathPrefix", func(t *testing.T) {
@@ -1538,6 +1540,7 @@ func TestReconcile(t *testing.T) {
 			Spec: mcpv1alpha1.MCPServerSpec{
 				Image:       "test-image",
 				IngressHost: "example.com",
+				IngressPath: "/test-server/mcp",
 			},
 		}
 		client := fake.NewClientBuilder().WithScheme(scheme).WithObjects(mcpServer).Build()

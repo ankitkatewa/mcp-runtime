@@ -27,7 +27,7 @@ make build
 ./bin/mcp-runtime auth login --api-url https://platform.example.com --token-stdin < token.txt
 ./bin/mcp-runtime auth status
 
-./bin/mcp-runtime registry push --image <resolved-registry-host>/my-server:v1.0.0
+./bin/mcp-runtime registry push --image <image-ref-you-built-locally>
 ./bin/mcp-runtime pipeline generate --dir .mcp --output manifests/
 ./bin/mcp-runtime pipeline deploy --dir manifests/
 ```
@@ -169,9 +169,11 @@ mcp-runtime registry provision \
 
 # Push images (default mode is in-cluster helper pod)
 mcp-runtime registry push --image <resolved-registry-host>/payments:v1
-mcp-runtime registry push --image <resolved-registry-host>/payments:v1 --mode direct
-mcp-runtime registry push --image <resolved-registry-host>/payments:v1 --name payments-api
+mcp-runtime registry push --image payments:v1 --mode direct
+mcp-runtime registry push --image payments:v1 --name payments-api
 ```
+
+When you use `server build image`, push the exact image ref it produced. That ref can include a resolved registry host instead of a short local name.
 
 ## pipeline
 
@@ -224,12 +226,12 @@ mcp-runtime server logs payments --follow
 
 # Build (push lives under registry)
 mcp-runtime server build image payments --tag v1
-mcp-runtime registry push --image <resolved-registry-host>/payments:v1
+mcp-runtime registry push --image <exact-image-ref-from-build>
 ```
 
 `server patch` accepts inline `--patch` or `--patch-file` with `merge`, `json`, or `strategic` modes.
 
-`server build image` updates matching `.mcp` metadata when you use the metadata-driven pipeline. It does not deploy by itself; push and deploy are separate steps. Push the exact full image reference emitted by build/metadata, not a shortened local image name.
+`server build image` updates matching `.mcp` metadata when you use the metadata-driven pipeline. It can resolve to a concrete host such as `10.43.109.51:5000/payments:v1`. Push that exact ref. The command does not deploy by itself; push and deploy are separate steps.
 
 ## sentinel
 
@@ -288,7 +290,7 @@ mcp-runtime setup
 
 # Push a server image
 mcp-runtime server build image payments
-mcp-runtime registry push --image <resolved-registry-host>/payments:latest
+mcp-runtime registry push --image <exact-image-ref-from-build>
 
 # Deploy from metadata
 mcp-runtime pipeline generate --dir .mcp --output manifests
