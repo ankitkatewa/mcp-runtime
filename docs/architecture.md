@@ -62,6 +62,83 @@ The operator watches `MCPServer`, `MCPAccessGrant`, and `MCPAgentSession` resour
 
 The CRDs are the contract between user intent and cluster state. The `api/v1alpha1` Go types and generated CRD YAML are the source of truth for supported fields and validation.
 
+## End-to-End Flow
+
+This is the full platform path from publish time to live governed tool calls.
+
+### Provision and reconcile flow
+
+```mermaid
+sequenceDiagram
+    participant Dev as Developer / CI
+    participant CLI as mcp-runtime CLI
+    participant Registry as Registry
+    participant K8s as Kubernetes API
+    participant Operator as Runtime Operator
+    participant Proxy as mcp-proxy
+    participant Svc as MCP server workload
+
+    Dev->>CLI: Build image and prepare MCPServer spec
+    CLI->>Registry: Push image
+    CLI->>K8s: Apply MCPServer + grant/session CRs
+    K8s-->>Operator: Watch CRD changes
+    Operator->>K8s: Reconcile Deployment, Service, Ingress
+    Operator->>K8s: Render policy ConfigMap
+    K8s-->>Proxy: Mount policy to gateway sidecar
+    K8s-->>Svc: Start MCP server pods
+```
+
+### Live request flow (allow + audit)
+
+```mermaid
+sequenceDiagram
+    participant Client as MCP client / agent
+    participant Ingress as Ingress route
+    participant Proxy as mcp-proxy
+    participant Svc as MCP server
+    participant Ingest as Sentinel ingest
+    participant Kafka as Kafka
+    participant Processor as Sentinel processor
+    participant CH as ClickHouse
+    participant API as Sentinel API/UI
+
+    Client->>Ingress: JSON-RPC tools/call
+    Ingress->>Proxy: Forward request
+    Proxy->>Proxy: Evaluate identity, grant, session, trust
+    Proxy->>Svc: Forward allowed request
+    Svc-->>Proxy: Tool result
+    Proxy-->>Client: Success response
+    Proxy->>Ingest: Emit audit event
+    Ingest->>Kafka: Publish mcp.events
+    Kafka->>Processor: Deliver event
+    Processor->>CH: Batch insert
+    API->>CH: Query decisions and metrics
+```
+
+### Live request flow (deny + audit)
+
+```mermaid
+sequenceDiagram
+    participant Client as MCP client / agent
+    participant Ingress as Ingress route
+    participant Proxy as mcp-proxy
+    participant Ingest as Sentinel ingest
+    participant Kafka as Kafka
+    participant Processor as Sentinel processor
+    participant CH as ClickHouse
+    participant API as Sentinel API/UI
+
+    Client->>Ingress: JSON-RPC tools/call
+    Ingress->>Proxy: Forward request
+    Proxy->>Proxy: Evaluate identity, grant, session, trust
+    Proxy-->>Client: Deny (JSON-RPC error)
+    Proxy->>Ingest: Emit deny event (reason + policy context)
+    Ingest->>Kafka: Publish mcp.events
+    Kafka->>Processor: Deliver event
+    Processor->>CH: Batch insert
+    API->>CH: Query deny history and trends
+```
+
 ## Brokered Request Path
 
 Public traffic enters through the configured ingress controller. The default public shape is path based: `/<server-name>/mcp`, or `/<publicPathPrefix>/mcp` when `spec.publicPathPrefix` is set.
@@ -69,6 +146,49 @@ Public traffic enters through the configured ingress controller. The default pub
 When the gateway is enabled, requests flow through `mcp-proxy` before they reach the MCP server. The proxy acts as the broker: it reads identity and session headers, evaluates grants and sessions from the rendered policy ConfigMap, forwards allowed MCP calls, rejects denied calls, and emits audit events.
 
 Sentinel services receive those events, process them for analytics, and expose the dashboard/API used to inspect servers, grants, sessions, and recent decisions.
+
+### Why this path matters
+
+- Policy is enforced before tools execute, not after.
+- Every allow/deny decision can be traced with subject, server, session, trust, and tool context.
+- Security enforcement stays on the hot request path while analytics is decoupled through Kafka + ClickHouse.
+
+### Sentinel request flow
+
+```mermaid
+flowchart LR
+    Client[MCP client / agent] --> Ingress[Ingress route]
+    Ingress --> Proxy[mcp-proxy]
+    Policy[Rendered grant+session policy] --> Proxy
+    Proxy -->|allow| Server[MCP server]
+    Proxy -->|deny| Deny[JSON-RPC error response]
+    Proxy -->|audit event| Ingest[Sentinel ingest]
+    Ingest -->|mcp.events| Kafka[(Kafka)]
+    Kafka --> Processor[Sentinel processor]
+    Processor -->|batch writes| ClickHouse[(ClickHouse)]
+    ClickHouse --> API[Sentinel API]
+    API --> UI[Sentinel UI]
+    API --> Grafana[Grafana / dashboards]
+```
+
+1. The client sends MCP JSON-RPC traffic to the server ingress path.
+2. `mcp-proxy` evaluates identity/session headers against operator-rendered policy.
+3. Allowed calls are forwarded upstream; denied calls are rejected immediately.
+4. `mcp-proxy` emits decision events to `ingest`, which publishes to Kafka.
+5. `processor` consumes Kafka and writes normalized event records into ClickHouse.
+6. `api`, `ui`, and dashboards query ClickHouse-backed data for governance and operations.
+
+### Sentinel components involved
+
+| Component | Responsibility in request flow |
+|---|---|
+| `mcp-proxy` | Inline policy enforcement, allow/deny decision, audit event emission. |
+| `ingest` | Authenticates and accepts `/events`, then publishes to Kafka. |
+| `kafka` | Buffers request events between ingest and processing. |
+| `processor` | Consumes events, batches, and writes to ClickHouse. |
+| `clickhouse` | Durable analytics and audit store for request decisions. |
+| `api` | Query and governance surface used by CLI/UI and integrations. |
+| `ui` / `grafana` | Human-facing operations and audit visibility. |
 
 ## Boundaries
 
