@@ -28,6 +28,31 @@ flowchart LR
 | Sentinel | Audit, analytics, API, UI, and operational visibility for governed MCP traffic. |
 | Infrastructure | Kubernetes-native routing, TLS/DNS integration, namespaces, services, and ingress ownership. |
 
+## Market Position
+
+MCP Runtime should be compared with MCP directories and catalogs, but it is not
+trying to be a listing site. Products such as Glama, Smithery, Docker MCP Catalog,
+PulseMCP, mcp.so, and client-specific catalogs are strongest at public
+discovery, metadata, installation snippets, or client onboarding. MCP Runtime
+uses a platform UI as the front door to a deployable runtime platform.
+
+| Market category | Typical scope | MCP Runtime difference |
+|---|---|---|
+| Public MCP directories | Search, categories, public server metadata, install snippets. | Adds a deployable Kubernetes control plane, internal server catalog, registry workflow, broker, policy, and audit path. |
+| Client catalogs | One-click install inside a specific MCP client. | Stays client-neutral and governs server access before tool calls reach the workload. |
+| Hosted registry/control-plane products | Hosted discovery, connectors, gateway, or publisher workflows. | Can run in the company's cluster with CRDs, operator reconciliation, and private infrastructure ownership. |
+| Container/catalog products | Trusted images, runtime packaging, and client connection profiles. | Extends beyond packaging into access grants, consented sessions, policy decisions, and compliance-oriented event history. |
+
+The public `platform.mcpruntime.org` surface is therefore a preview of how the
+platform looks after deployment. It is not a place for companies to list or sell
+products; it is a way to evaluate the governed control-plane model before
+installing it.
+
+Based on the currently visible open source MCP ecosystem, MCP Runtime appears to
+fill a gap: an open source MCP platform that combines server discovery with the
+deployable Kubernetes runtime, brokered request path, access/session model,
+registry workflow, and audit pipeline in one system.
+
 ## Control Plane
 
 The CLI owns workstation and cluster workflows: dependency checks, bootstrap preflights, setup, registry operations, manifest generation, and access-management commands. It writes Kubernetes resources rather than running the data path itself.
