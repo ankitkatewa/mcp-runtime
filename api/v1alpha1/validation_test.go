@@ -107,6 +107,41 @@ func TestMCPServerDefault(t *testing.T) {
 	}
 }
 
+func TestMCPServerDefaultImageTagForHostPortImages(t *testing.T) {
+	tests := []struct {
+		name  string
+		image string
+		want  string
+	}{
+		{
+			name:  "sets latest when hostport image has no tag",
+			image: "10.43.109.51:5000/python-example-mcp",
+			want:  "latest",
+		},
+		{
+			name:  "does not set imageTag when hostport image already has tag",
+			image: "10.43.109.51:5000/python-example-mcp:52c916f",
+			want:  "",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			server := &MCPServer{
+				ObjectMeta: metav1.ObjectMeta{Name: "test-server"},
+				Spec: MCPServerSpec{
+					Image: tt.image,
+				},
+			}
+
+			server.Default()
+			if server.Spec.ImageTag != tt.want {
+				t.Fatalf("imageTag = %q, want %q", server.Spec.ImageTag, tt.want)
+			}
+		})
+	}
+}
+
 func TestMCPServerValidateCanaryRollout(t *testing.T) {
 	server := &MCPServer{
 		Spec: MCPServerSpec{

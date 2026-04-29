@@ -334,6 +334,32 @@ func TestSetDefaults(t *testing.T) {
 		assertEqual(t, "imageTag", mcpServer.Spec.ImageTag, "")
 	})
 
+	t.Run("sets imageTag for hostport image without tag", func(t *testing.T) {
+		mcpServer := mcpv1alpha1.MCPServer{
+			ObjectMeta: metav1.ObjectMeta{Name: "test"},
+			Spec: mcpv1alpha1.MCPServerSpec{
+				Image: "10.43.109.51:5000/python-example-mcp",
+			},
+		}
+		r := MCPServerReconciler{Scheme: runtime.NewScheme()}
+		r.setDefaults(&mcpServer)
+
+		assertEqual(t, "imageTag", mcpServer.Spec.ImageTag, "latest")
+	})
+
+	t.Run("skips imageTag when hostport image already has tag", func(t *testing.T) {
+		mcpServer := mcpv1alpha1.MCPServer{
+			ObjectMeta: metav1.ObjectMeta{Name: "test"},
+			Spec: mcpv1alpha1.MCPServerSpec{
+				Image: "10.43.109.51:5000/python-example-mcp:52c916f",
+			},
+		}
+		r := MCPServerReconciler{Scheme: runtime.NewScheme()}
+		r.setDefaults(&mcpServer)
+
+		assertEqual(t, "imageTag", mcpServer.Spec.ImageTag, "")
+	})
+
 	t.Run("skips ingressPath if name is empty", func(t *testing.T) {
 		mcpServer := mcpv1alpha1.MCPServer{} // No name set
 		r := MCPServerReconciler{Scheme: runtime.NewScheme()}
@@ -1393,6 +1419,36 @@ func TestResolveImage(t *testing.T) {
 			t.Fatalf("failed to resolve image: %v", err)
 		}
 		assertEqual(t, "image", image, "test-image:v1.0.0")
+	})
+	t.Run("appends imageTag when image uses hostport registry", func(t *testing.T) {
+		mcpServer := &mcpv1alpha1.MCPServer{
+			ObjectMeta: metav1.ObjectMeta{Name: "test-server", Namespace: "default"},
+			Spec: mcpv1alpha1.MCPServerSpec{
+				Image:    "10.43.109.51:5000/python-example-mcp",
+				ImageTag: "52c916f",
+			},
+		}
+		r := MCPServerReconciler{}
+		image, err := r.resolveImage(context.Background(), mcpServer)
+		if err != nil {
+			t.Fatalf("failed to resolve image: %v", err)
+		}
+		assertEqual(t, "image", image, "10.43.109.51:5000/python-example-mcp:52c916f")
+	})
+	t.Run("preserves explicit tag when image uses hostport registry", func(t *testing.T) {
+		mcpServer := &mcpv1alpha1.MCPServer{
+			ObjectMeta: metav1.ObjectMeta{Name: "test-server", Namespace: "default"},
+			Spec: mcpv1alpha1.MCPServerSpec{
+				Image:    "10.43.109.51:5000/python-example-mcp:52c916f",
+				ImageTag: "ignored",
+			},
+		}
+		r := MCPServerReconciler{}
+		image, err := r.resolveImage(context.Background(), mcpServer)
+		if err != nil {
+			t.Fatalf("failed to resolve image: %v", err)
+		}
+		assertEqual(t, "image", image, "10.43.109.51:5000/python-example-mcp:52c916f")
 	})
 	t.Run("returns user-specified image with registry override", func(t *testing.T) {
 		mcpServer := &mcpv1alpha1.MCPServer{

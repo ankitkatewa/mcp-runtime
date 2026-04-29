@@ -65,13 +65,23 @@ func defaultPublicPathPrefixFromName(name string) string {
 	return strings.TrimSpace(name)
 }
 
+func imageHasTagOrDigest(image string) bool {
+	if strings.Contains(image, "@") {
+		return true
+	}
+
+	lastSlash := strings.LastIndex(image, "/")
+	lastColon := strings.LastIndex(image, ":")
+	return lastColon > lastSlash
+}
+
 func gatewayEnabled(spec MCPServerSpec) bool {
 	return spec.Gateway != nil && spec.Gateway.Enabled
 }
 
 // +kubebuilder:webhook:path=/mutate-mcpruntime-org-v1alpha1-mcpserver,mutating=true,failurePolicy=fail,sideEffects=None,groups=mcpruntime.org,resources=mcpservers,verbs=create;update,versions=v1alpha1,name=mmcpserver.kb.io,admissionReviewVersions=v1
 func (r *MCPServer) Default() {
-	if strings.TrimSpace(r.Spec.ImageTag) == "" && !strings.Contains(r.Spec.Image, ":") && !strings.Contains(r.Spec.Image, "@") {
+	if strings.TrimSpace(r.Spec.ImageTag) == "" && !imageHasTagOrDigest(strings.TrimSpace(r.Spec.Image)) {
 		r.Spec.ImageTag = defaultImageTag
 	}
 	if r.Spec.Replicas == nil {
