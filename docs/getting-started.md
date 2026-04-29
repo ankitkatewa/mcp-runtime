@@ -421,10 +421,12 @@ Author lightweight metadata YAML, generate CRDs, and deploy:
 
 ```bash
 ./bin/mcp-runtime server build image my-server --tag v1.0.0
-./bin/mcp-runtime registry push --image my-server:v1.0.0
+./bin/mcp-runtime registry push --image <exact-image-ref-from-build>
 ./bin/mcp-runtime pipeline generate --dir .mcp --output manifests/
 ./bin/mcp-runtime pipeline deploy --dir manifests/
 ```
+
+`<exact-image-ref-from-build>` may be a resolved registry endpoint such as `10.43.109.51:5000/my-server:v1.0.0`.
 
 The server lands at `/{server-name}/mcp` on the configured ingress host, behind the same platform surface you use for future MCP servers.
 

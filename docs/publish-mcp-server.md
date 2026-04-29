@@ -131,27 +131,34 @@ Generate and deploy manifests:
 
 ## Build and push the server image
 
-For the direct manifest path, build the image with your normal container workflow:
+MCP Runtime supports two practical image flows. Keep these flows separate so tags stay consistent.
 
-```bash
-docker build -t payments:v1.0.0 .
-```
-
-For the metadata-driven path, use the CLI helper:
+### Flow A — metadata-driven build with the CLI
 
 ```bash
 ./bin/mcp-runtime server build image payments --tag v1.0.0
 ```
 
-This command builds a Docker image and updates the matching metadata entry. It is meant for the `.mcp` pipeline flow.
+`server build image` builds the image, resolves the target registry host, tags the local image with that resolved reference, and rewrites matching `.mcp` metadata (`image` and `imageTag`).
 
-Then push the image:
+After this command, push the exact image reference produced by the build output (or read it from the rewritten metadata):
 
 ```bash
-./bin/mcp-runtime registry push --image payments:v1.0.0
+./bin/mcp-runtime registry push --image <exact-image-ref-from-build>
 ```
 
-Typical user flow:
+`<exact-image-ref-from-build>` may be something like `10.43.109.51:5000/payments:v1.0.0`.
+
+Then generate and deploy from metadata:
+
+```bash
+./bin/mcp-runtime pipeline generate --dir .mcp --output manifests/
+./bin/mcp-runtime pipeline deploy --dir manifests/
+```
+
+### Flow B — manual Docker build, then push
+
+Use this when you manage image tags directly and apply `MCPServer` manifests yourself:
 
 ```bash
 docker build -t payments:v1.0.0 .
@@ -159,14 +166,7 @@ docker build -t payments:v1.0.0 .
 ./bin/mcp-runtime server apply --file payments.yaml
 ```
 
-Or, with metadata:
-
-```bash
-./bin/mcp-runtime server build image payments --tag v1.0.0
-./bin/mcp-runtime registry push --image payments:v1.0.0
-./bin/mcp-runtime pipeline generate --dir .mcp --output manifests/
-./bin/mcp-runtime pipeline deploy --dir manifests/
-```
+Short names like `payments:v1.0.0` are valid only when that exact local image tag exists.
 
 ## What happens after deploy
 
@@ -224,7 +224,7 @@ Check:
 
 - the `spec.image` and `spec.imageTag` in your manifest
 - the metadata entry updated by `server build image`
-- whether you pushed the same tag you applied
+- whether you pushed the exact same image reference (registry/repo/tag) that your metadata or manifest points to
 
 ### Image pushed, but server never becomes ready
 
