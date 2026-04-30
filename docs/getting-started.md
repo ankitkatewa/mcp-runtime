@@ -77,6 +77,11 @@ kind create cluster --name mcp-runtime --config /tmp/mcp-runtime-kind.yaml
 kubectl config use-context kind-mcp-runtime
 ```
 
+In test mode, setup intentionally emits pod image references under
+`registry.registry.svc.cluster.local:5000/...` so the image host matches this
+Kind containerd mirror exactly instead of using a mutable registry Service
+`ClusterIP:port`.
+
 Build the CLI, run bootstrap, and install the stack in test mode:
 
 ```bash
@@ -117,7 +122,8 @@ For Kind test mode, the usual cause is a cluster created without the
 `registry.registry.svc.cluster.local:5000` mirror to `127.0.0.1:32000`. If pod
 events include `http: server gave HTTP response to HTTPS client`, the node's
 containerd tried HTTPS against the HTTP dev registry. Configure the insecure
-registry mirror for the exact image host in the pod image reference, or use TLS.
+registry mirror for the exact image host string in the pod image reference
+(`registry.registry.svc.cluster.local:5000` in the documented Kind flow), or use TLS.
 On k3s with the bundled plain HTTP registry, that exact host may be the registry
 Service `ClusterIP:port` such as `10.43.x.x:5000`; add a matching
 `/etc/rancher/k3s/registries.yaml` mirror and restart k3s. On hosts where

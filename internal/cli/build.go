@@ -203,16 +203,34 @@ func updateMetadataImage(serverName, imageName, tag, metadataFile, metadataDir s
 func getPlatformRegistryURL(logger *zap.Logger) string {
 	const registryServiceDNS = "registry.registry.svc.cluster.local"
 
-	// Respect an explicitly configured endpoint. For the implicit local default
-	// (registry.local), prefer service-discovered endpoints that are known to work
-	// in kind-based CI/e2e flows.
+	// Respect an explicitly configured endpoint. The implicit local default
+	// (registry.local) is resolved from the installed registry service below.
 	if endpoint := strings.TrimSpace(GetRegistryEndpoint()); endpoint != "" &&
 		(endpoint != defaultRegistryEndpoint || registryEndpointExplicitlyConfigured()) {
 		return endpoint
 	}
 
-	// Otherwise read registry service IP/port and use the concrete service endpoint.
-	// This is resolvable from kind/containerd nodes where cluster DNS names may not be.
+	if os.Getenv("MCP_RUNTIME_TEST_MODE") == "1" {
+		// Kind contributor clusters configure containerd for this exact host.
+		// Avoid ClusterIP image refs, which change per cluster and bypass that mirror.
+		// #nosec G204 -- fixed arguments, no user input.
+		portCmd, portErr := kubectlClient.CommandArgs([]string{"get", "service", "registry", "-n", "registry", "-o", "jsonpath={.spec.ports[0].port}"})
+		var port []byte
+		if portErr == nil {
+			port, portErr = portCmd.Output()
+		}
+		portValue := strings.TrimSpace(string(port))
+		if portErr == nil && portValue != "" {
+			return fmt.Sprintf("%s:%s", registryServiceDNS, portValue)
+		}
+		if logger != nil {
+			logger.Warn("Could not detect registry service port in test mode, using default service DNS:port")
+		}
+		return fmt.Sprintf("%s:%d", registryServiceDNS, GetRegistryPort())
+	}
+
+	// Otherwise read registry service IP/port and use the concrete service endpoint,
+	// preserving the non-test fallback behavior for existing dev clusters.
 	// #nosec G204 -- fixed arguments, no user input.
 	ipCmd, ipErr := kubectlClient.CommandArgs([]string{"get", "service", "registry", "-n", "registry", "-o", "jsonpath={.spec.clusterIP}"})
 	var clusterIP []byte

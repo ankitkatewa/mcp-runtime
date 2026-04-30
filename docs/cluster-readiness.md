@@ -274,6 +274,10 @@ Multi-node k3s: apply the same `/etc/rancher/k3s/registries.yaml` and `/etc/host
 ## kind
 
 kind's nodes are containers, so the registry NodePort needs an `extraPortMappings` entry to be reachable, and containerd inside the node container needs the same mirror.
+For `setup --test-mode`, MCP Runtime emits image refs such as
+`registry.registry.svc.cluster.local:5000/mcp-sentinel-api:latest` so Kind
+nodes use one stable service-DNS host instead of a mutable registry
+`ClusterIP:port`.
 
 1. **Cluster config.** Pass this to `kind create cluster --config`:
 
@@ -282,7 +286,7 @@ kind's nodes are containers, so the registry NodePort needs an `extraPortMapping
    apiVersion: kind.x-k8s.io/v1alpha4
    containerdConfigPatches:
      - |-
-       [plugins."io.containerd.grpc.v1.cri".registry.mirrors."registry.local"]
+       [plugins."io.containerd.grpc.v1.cri".registry.mirrors."registry.registry.svc.cluster.local:5000"]
          endpoint = ["http://127.0.0.1:32000"]
        [plugins."io.containerd.grpc.v1.cri".registry.configs."127.0.0.1:32000".tls]
          insecure_skip_verify = true
@@ -294,11 +298,9 @@ kind's nodes are containers, so the registry NodePort needs an `extraPortMapping
            protocol: TCP
    ```
 
-2. **Host /etc/hosts** (on your laptop, so `docker push` / `curl` work):
-
-   ```text
-   127.0.0.1 registry.local
-   ```
+2. **Exact host matching.** If pod events show `http: server gave HTTP
+   response to HTTPS client`, compare the pod image host with the mirror key.
+   Containerd only applies the HTTP mirror when the strings match exactly.
 
 Alternative: `kind load docker-image <image>` sideloads without a registry at all — useful for throwaway tests, but bypasses the registry-push flow the CLI is built around.
 

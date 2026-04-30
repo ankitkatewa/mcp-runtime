@@ -416,8 +416,9 @@ func TestGetPlatformRegistryURLWithMock(t *testing.T) {
 		}
 	})
 
-	t.Run("falls_back_from_implicit_default_endpoint", func(t *testing.T) {
+	t.Run("non_test_uses_service_ip_for_implicit_default_endpoint", func(t *testing.T) {
 		DefaultCLIConfig = &CLIConfig{RegistryEndpoint: defaultRegistryEndpoint, RegistryIngressHost: defaultRegistryIngressHost, RegistryPort: 5000}
+		t.Setenv("MCP_RUNTIME_TEST_MODE", "")
 		originalKubectl := kubectlClient
 		defer func() { kubectlClient = originalKubectl }()
 
@@ -442,6 +443,38 @@ func TestGetPlatformRegistryURLWithMock(t *testing.T) {
 		}
 	})
 
+	t.Run("test_mode_prefers_service_dns_over_cluster_ip", func(t *testing.T) {
+		DefaultCLIConfig = &CLIConfig{RegistryEndpoint: defaultRegistryEndpoint, RegistryIngressHost: defaultRegistryIngressHost, RegistryPort: 5000}
+		t.Setenv("MCP_RUNTIME_TEST_MODE", "1")
+		originalKubectl := kubectlClient
+		defer func() { kubectlClient = originalKubectl }()
+
+		var clusterIPQueried bool
+		mock := &MockExecutor{
+			CommandFunc: func(spec ExecSpec) *MockCommand {
+				for _, arg := range spec.Args {
+					if arg == "jsonpath={.spec.clusterIP}" {
+						clusterIPQueried = true
+						return &MockCommand{OutputData: []byte("10.96.201.51")}
+					}
+					if arg == "jsonpath={.spec.ports[0].port}" {
+						return &MockCommand{OutputData: []byte("5000")}
+					}
+				}
+				return &MockCommand{}
+			},
+		}
+		kubectlClient = &KubectlClient{exec: mock, validators: nil}
+
+		url := getPlatformRegistryURL(logger)
+		if url != "registry.registry.svc.cluster.local:5000" {
+			t.Errorf("expected service DNS registry URL in test mode, got %q", url)
+		}
+		if clusterIPQueried {
+			t.Error("expected test mode to avoid ClusterIP lookup")
+		}
+	})
+
 	t.Run("respects_explicit_default_endpoint_override", func(t *testing.T) {
 		DefaultCLIConfig = &CLIConfig{RegistryEndpoint: defaultRegistryEndpoint, RegistryIngressHost: defaultRegistryIngressHost, RegistryPort: 5000}
 		t.Setenv("MCP_REGISTRY_ENDPOINT", defaultRegistryEndpoint)
@@ -449,6 +482,17 @@ func TestGetPlatformRegistryURLWithMock(t *testing.T) {
 		url := getPlatformRegistryURL(logger)
 		if url != defaultRegistryEndpoint {
 			t.Errorf("expected explicitly configured endpoint %q, got %q", defaultRegistryEndpoint, url)
+		}
+	})
+
+	t.Run("test_mode_respects_explicit_registry_host", func(t *testing.T) {
+		DefaultCLIConfig = &CLIConfig{RegistryEndpoint: "registry.example.com:5000", RegistryIngressHost: "registry.example.com", RegistryPort: 5000}
+		t.Setenv("MCP_RUNTIME_TEST_MODE", "1")
+		t.Setenv("MCP_REGISTRY_HOST", "registry.example.com:5000")
+
+		url := getPlatformRegistryURL(logger)
+		if url != "registry.example.com:5000" {
+			t.Errorf("expected explicit registry host, got %q", url)
 		}
 	})
 
@@ -501,6 +545,30 @@ func TestGetPlatformRegistryURLWithMock(t *testing.T) {
 		url := getPlatformRegistryURL(logger)
 		if !strings.Contains(url, "registry.registry.svc.cluster.local") {
 			t.Errorf("expected default registry URL, got %q", url)
+		}
+	})
+
+	t.Run("test_mode_returns_default_when_port_command_fails", func(t *testing.T) {
+		DefaultCLIConfig = &CLIConfig{RegistryEndpoint: "", RegistryIngressHost: "", RegistryPort: 5001}
+		t.Setenv("MCP_RUNTIME_TEST_MODE", "1")
+		originalKubectl := kubectlClient
+		defer func() { kubectlClient = originalKubectl }()
+
+		mock := &MockExecutor{
+			CommandFunc: func(spec ExecSpec) *MockCommand {
+				for _, arg := range spec.Args {
+					if arg == "jsonpath={.spec.ports[0].port}" {
+						return &MockCommand{OutputErr: errors.New("kubectl error")}
+					}
+				}
+				return &MockCommand{}
+			},
+		}
+		kubectlClient = &KubectlClient{exec: mock, validators: nil}
+
+		url := getPlatformRegistryURL(logger)
+		if url != "registry.registry.svc.cluster.local:5001" {
+			t.Errorf("expected default service DNS registry URL, got %q", url)
 		}
 	})
 

@@ -93,7 +93,9 @@ kubectl port-forward -n traefik svc/traefik 18080:8000   # expose ingress
 
 `setup --test-mode` is not a no-build path: it builds and pushes the operator,
 gateway proxy, and Sentinel images with `latest` tags to the configured or
-bundled registry, then deploys pods that pull those images.
+bundled registry, then deploys pods that pull those images. In Kind test mode,
+implicit internal image refs use `registry.registry.svc.cluster.local:5000/...`
+so the documented containerd mirror matches the image host exactly.
 
 - **Status:** `./bin/mcp-runtime status`
 - **Contributor smoke:** for dashboard access, local image push, MCP JSON-RPC request, and Sentinel event checks, follow `docs/getting-started.md#3-contributor-test-mode-cluster`.
@@ -159,7 +161,7 @@ kubectl patch secret mcp-sentinel-secrets -n mcp-sentinel --type merge -p '{"str
 **When this section applies**
 
 - **Dev HTTP registry (typical on k3s or lab):** run `./bin/mcp-runtime setup` **without** `--with-tls`. Setup logs `TLS: disabled (dev HTTP mode)` for the internal registry; the registry serves **HTTP**, so you need the **Docker** and **k3s** config in the table below on every machine that builds/pushes or pulls.
-- **`--test-mode`:** meant mainly for **Kind** contributor and CI flows. It keeps production guardrails off, uses local/dev registry behavior, and still builds and pushes operator, gateway proxy, and Sentinel images with `latest` tags. Pods still pull those images from the configured or bundled registry, so k3s/containerd needs an insecure HTTP mirror for the exact image host and port, such as `10.43.x.x:5000`, when using the bundled plain HTTP registry. On k3s hosts with an empty/minimal `~/.kube/config`, pass `--kubeconfig /etc/rancher/k3s/k3s.yaml`.
+- **`--test-mode`:** meant mainly for **Kind** contributor and CI flows. It keeps production guardrails off, uses local/dev registry behavior, and still builds and pushes operator, gateway proxy, and Sentinel images with `latest` tags. In Kind, implicit bundled-registry image refs use `registry.registry.svc.cluster.local:5000/...` to match the documented mirror. On k3s, pods still pull from the exact configured or discovered image host, such as `10.43.x.x:5000`, so k3s/containerd needs a matching insecure HTTP mirror when using the bundled plain HTTP registry. On k3s hosts with an empty/minimal `~/.kube/config`, pass `--kubeconfig /etc/rancher/k3s/k3s.yaml`.
 - **Bundled registry on k3s:** setup prints the selected registry **Internal URL** after creating the registry Service. If you did not preconfigure a stable registry endpoint, copy that exact `host:port` into `/etc/rancher/k3s/registries.yaml`, restart `k3s` / `k3s-agent`, then rerun setup. If StatefulSet storage was interrupted during a failed run, clear the partial runtime namespaces first.
 
 The platform can install a **plain HTTP** Docker distribution registry (typical in dev with `./bin/mcp-runtime setup` **without** `--with-tls`). Runtimes default to **HTTPS** for any registry; you must allow **HTTP (insecure)** in two places: the host where you run **Docker** (build/push) and every **k3s node** (kubelet/containerd pull for Pods).
