@@ -21,6 +21,8 @@ const (
 )
 
 var platformLoginAttempts = newAPILoginAttemptTracker(time.Now)
+var oidcLoginHook func(context.Context, *apiServer, string) (platformUser, error)
+var errOIDCUnauthorized = errors.New("oidc unauthorized")
 
 type apiLoginAttempt struct {
 	failures    int
@@ -279,6 +281,117 @@ func (s *apiServer) handleLogin(w http.ResponseWriter, r *http.Request) {
 	}
 	s.platform.WriteAudit(r.Context(), auditEvent{UserID: u.ID, Action: "login", Resource: "user", Namespace: u.Namespace, Status: "success", ActorIP: requestIP(r)})
 	writeJSON(w, http.StatusOK, map[string]any{"access_token": token, "token_type": "bearer", "expires_in": int(platformAccessTokenTTL.Seconds()), "user": u})
+}
+
+func (s *apiServer) handleOIDCLogin(w http.ResponseWriter, r *http.Request) {
+	if s.platform == nil {
+		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "platform identity database not configured"})
+		return
+	}
+	if r.Method != http.MethodPost {
+		w.Header().Set("allow", "POST")
+		writeJSON(w, http.StatusMethodNotAllowed, map[string]string{"error": "method_not_allowed"})
+		return
+	}
+	if s.jwks == nil || strings.TrimSpace(s.oidcIssuer) == "" || strings.TrimSpace(s.oidcAudience) == "" {
+		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "oidc_not_configured"})
+		return
+	}
+
+	var req struct {
+		IDToken string `json:"id_token"`
+	}
+	r.Body = http.MaxBytesReader(w, r.Body, 8192)
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeBodyDecodeError(w, err)
+		return
+	}
+	idToken := strings.TrimSpace(req.IDToken)
+	if idToken == "" {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "missing_id_token"})
+		return
+	}
+
+	var (
+		u   platformUser
+		err error
+	)
+	if oidcLoginHook != nil {
+		u, err = oidcLoginHook(r.Context(), s, idToken)
+	} else {
+		u, err = s.resolveOIDCLoginUser(r.Context(), idToken)
+	}
+	if err != nil {
+		statusCode := http.StatusInternalServerError
+		auditStatus := "error"
+		auditResource := strings.ToLower(strings.TrimSpace(u.Email))
+		if errors.Is(err, errOIDCUnauthorized) {
+			statusCode = http.StatusUnauthorized
+			auditStatus = "denied"
+		}
+		s.platform.WriteAudit(r.Context(), auditEvent{
+			Action:   "oidc_login",
+			Resource: auditResource,
+			Status:   auditStatus,
+			Message:  err.Error(),
+			ActorIP:  requestIP(r),
+		})
+		if statusCode == http.StatusUnauthorized {
+			writeJSON(w, statusCode, map[string]string{"error": "unauthorized"})
+			return
+		}
+		writeJSON(w, statusCode, map[string]string{"error": "login_failed"})
+		return
+	}
+
+	token, err := s.platform.CreateAccessToken(u, platformAccessTokenTTL)
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "failed to issue token"})
+		return
+	}
+	s.platform.WriteAudit(r.Context(), auditEvent{UserID: u.ID, Action: "oidc_login", Resource: "user", Namespace: u.Namespace, Status: "success", ActorIP: requestIP(r)})
+	writeJSON(w, http.StatusOK, map[string]any{"access_token": token, "token_type": "bearer", "expires_in": int(platformAccessTokenTTL.Seconds()), "user": u})
+}
+
+func (s *apiServer) resolveOIDCLoginUser(ctx context.Context, idToken string) (platformUser, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, "http://localhost/api/auth/me", nil)
+	if err != nil {
+		return platformUser{}, err
+	}
+	req.Header.Set("authorization", "Bearer "+idToken)
+
+	p, ok, err := s.authenticateRequest(req)
+	if err != nil {
+		return platformUser{}, err
+	}
+	if !ok || strings.TrimSpace(p.AuthType) != "oidc_jwt" {
+		return platformUser{}, fmt.Errorf("%w: token authentication failed", errOIDCUnauthorized)
+	}
+	if strings.TrimSpace(p.Subject) == "" {
+		return platformUser{}, fmt.Errorf("%w: token missing user identity", errOIDCUnauthorized)
+	}
+	if strings.TrimSpace(p.Email) == "" {
+		return platformUser{}, fmt.Errorf("%w: token missing email", errOIDCUnauthorized)
+	}
+	role := strings.TrimSpace(p.Role)
+	if role == "" {
+		role = roleUser
+	}
+
+	u, ok, err := s.platform.GetUser(ctx, p.Subject)
+	if err != nil {
+		return platformUser{}, err
+	}
+	if ok {
+		return u, nil
+	}
+
+	return platformUser{
+		ID:        strings.TrimSpace(p.Subject),
+		Email:     strings.TrimSpace(p.Email),
+		Role:      role,
+		Namespace: strings.TrimSpace(p.Namespace),
+	}, nil
 }
 
 func requestIP(r *http.Request) string {

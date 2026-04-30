@@ -2,8 +2,6 @@ package main
 
 import (
 	"context"
-	"encoding/base64"
-	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -161,8 +159,9 @@ func TestAPIProxyAllowsPublicRuntimeServers(t *testing.T) {
 }
 
 func TestHandleLoginWithOIDCToken(t *testing.T) {
-	previousHook := oidcVerifyHook
-	oidcVerifyHook = func(_ context.Context, upstream, token string) (sessionPrincipal, error) {
+	now := time.Now().UTC()
+	previousHook := oidcLoginHook
+	oidcLoginHook = func(_ context.Context, upstream, token string) (sessionPrincipal, string, time.Time, error) {
 		if upstream != "http://api.example" {
 			t.Fatalf("upstream = %q, want http://api.example", upstream)
 		}
@@ -172,10 +171,10 @@ func TestHandleLoginWithOIDCToken(t *testing.T) {
 		return sessionPrincipal{
 			Role:     "user",
 			Subject:  "user-123",
-			AuthType: "oidc_jwt",
-		}, nil
+			AuthType: "platform_jwt",
+		}, "platform-token", now.Add(15 * time.Minute), nil
 	}
-	defer func() { oidcVerifyHook = previousHook }()
+	defer func() { oidcLoginHook = previousHook }()
 
 	store := newUISessionStore(time.Now)
 	login := httptest.NewRecorder()
@@ -187,11 +186,21 @@ func TestHandleLoginWithOIDCToken(t *testing.T) {
 	if len(cookies) != 1 {
 		t.Fatalf("cookies = %d, want 1", len(cookies))
 	}
+	sess, ok := store.get(cookies[0].Value)
+	if !ok {
+		t.Fatal("expected persisted session")
+	}
+	if got := sess.UpstreamAuthHeader; got != "Bearer platform-token" {
+		t.Fatalf("stored upstream authorization = %q", got)
+	}
+	if got := sess.UpstreamAuthHeader; strings.Contains(got, "id-token") {
+		t.Fatalf("stored upstream authorization leaked raw id token: %q", got)
+	}
 
 	upstreamCalled := false
 	transport := roundTripFunc(func(r *http.Request) (*http.Response, error) {
 		upstreamCalled = true
-		if got := r.Header.Get("authorization"); got != "Bearer id-token" {
+		if got := r.Header.Get("authorization"); got != "Bearer platform-token" {
 			t.Fatalf("authorization forwarded = %q", got)
 		}
 		if got := r.Header.Get("x-api-key"); got != "" {
@@ -216,8 +225,8 @@ func TestHandleLoginWithOIDCToken(t *testing.T) {
 
 func TestHandleLoginWithOIDCTokenCapsSessionToTokenExpiry(t *testing.T) {
 	now := time.Now().UTC().Add(2 * time.Minute)
-	previousHook := oidcVerifyHook
-	oidcVerifyHook = func(_ context.Context, upstream, token string) (sessionPrincipal, error) {
+	previousHook := oidcLoginHook
+	oidcLoginHook = func(_ context.Context, upstream, token string) (sessionPrincipal, string, time.Time, error) {
 		if upstream != "http://api.example" {
 			t.Fatalf("upstream = %q, want http://api.example", upstream)
 		}
@@ -227,17 +236,14 @@ func TestHandleLoginWithOIDCTokenCapsSessionToTokenExpiry(t *testing.T) {
 		return sessionPrincipal{
 			Role:     "user",
 			Subject:  "user-123",
-			AuthType: "oidc_jwt",
-		}, nil
+			AuthType: "platform_jwt",
+		}, "platform-token", now.Add(30 * time.Minute), nil
 	}
-	defer func() { oidcVerifyHook = previousHook }()
+	defer func() { oidcLoginHook = previousHook }()
 
-	exp := now.Add(30 * time.Minute)
-	payload := fmt.Sprintf(`{"exp":%d}`, exp.Unix())
-	idToken := "eyJhbGciOiJub25lIn0." + base64.RawURLEncoding.EncodeToString([]byte(payload)) + ".sig"
 	store := newUISessionStore(func() time.Time { return now })
 	login := httptest.NewRecorder()
-	handleLogin("", "api-secret", "http://api.example", store).ServeHTTP(login, httptest.NewRequest(http.MethodPost, "/auth/login", strings.NewReader(`{"id_token":"`+idToken+`"}`)))
+	handleLogin("", "api-secret", "http://api.example", store).ServeHTTP(login, httptest.NewRequest(http.MethodPost, "/auth/login", strings.NewReader(`{"id_token":"id-token"}`)))
 	if login.Code != http.StatusOK {
 		t.Fatalf("login status = %d, want %d; body=%s", login.Code, http.StatusOK, login.Body.String())
 	}
@@ -252,8 +258,52 @@ func TestHandleLoginWithOIDCTokenCapsSessionToTokenExpiry(t *testing.T) {
 	if !ok {
 		t.Fatal("expected persisted session")
 	}
+	exp := now.Add(30 * time.Minute)
 	if sess.ExpiresAt.After(exp.Add(time.Second)) || sess.ExpiresAt.Before(exp.Add(-1*time.Second)) {
 		t.Fatalf("session expiry = %s, want %s", sess.ExpiresAt.Format(time.RFC3339), exp.Format(time.RFC3339))
+	}
+}
+
+func TestUISessionStateIsEphemeralAcrossStoreRestart(t *testing.T) {
+	now := time.Now().UTC()
+	previousHook := oidcLoginHook
+	oidcLoginHook = func(_ context.Context, upstream, token string) (sessionPrincipal, string, time.Time, error) {
+		if upstream != "http://api.example" {
+			t.Fatalf("upstream = %q, want http://api.example", upstream)
+		}
+		if token == "" {
+			t.Fatal("token should not be empty")
+		}
+		return sessionPrincipal{Role: "user", Subject: "user-123", AuthType: "platform_jwt"}, "platform-token", now.Add(10 * time.Minute), nil
+	}
+	defer func() { oidcLoginHook = previousHook }()
+
+	originalStore := newUISessionStore(func() time.Time { return now })
+	login := httptest.NewRecorder()
+	handleLogin("", "api-secret", "http://api.example", originalStore).ServeHTTP(login, httptest.NewRequest(http.MethodPost, "/auth/login", strings.NewReader(`{"id_token":"id-token"}`)))
+	if login.Code != http.StatusOK {
+		t.Fatalf("login status = %d, want %d; body=%s", login.Code, http.StatusOK, login.Body.String())
+	}
+	cookies := login.Result().Cookies()
+	if len(cookies) != 1 {
+		t.Fatalf("cookies = %d, want 1", len(cookies))
+	}
+
+	beforeRestart := httptest.NewRecorder()
+	beforeReq := httptest.NewRequest(http.MethodGet, "/auth/status", nil)
+	beforeReq.AddCookie(cookies[0])
+	handleStatus(originalStore).ServeHTTP(beforeRestart, beforeReq)
+	if !strings.Contains(beforeRestart.Body.String(), `"authenticated":true`) {
+		t.Fatalf("status before restart = %s", beforeRestart.Body.String())
+	}
+
+	restartedStore := newUISessionStore(func() time.Time { return now })
+	afterRestart := httptest.NewRecorder()
+	afterReq := httptest.NewRequest(http.MethodGet, "/auth/status", nil)
+	afterReq.AddCookie(cookies[0])
+	handleStatus(restartedStore).ServeHTTP(afterRestart, afterReq)
+	if !strings.Contains(afterRestart.Body.String(), `"authenticated":false`) {
+		t.Fatalf("status after restart = %s", afterRestart.Body.String())
 	}
 }
 
