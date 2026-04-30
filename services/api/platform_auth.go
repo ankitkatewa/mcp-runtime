@@ -12,6 +12,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/golang-jwt/jwt/v4"
 )
 
 const platformAccessTokenTTL = 15 * time.Minute
@@ -325,6 +327,9 @@ func (s *apiServer) handleOIDCLogin(w http.ResponseWriter, r *http.Request) {
 		statusCode := http.StatusInternalServerError
 		auditStatus := "error"
 		auditResource := strings.ToLower(strings.TrimSpace(u.Email))
+		if auditResource == "" {
+			auditResource = oidcAuditResource(idToken)
+		}
 		if errors.Is(err, errOIDCUnauthorized) {
 			statusCode = http.StatusUnauthorized
 			auditStatus = "denied"
@@ -354,7 +359,7 @@ func (s *apiServer) handleOIDCLogin(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *apiServer) resolveOIDCLoginUser(ctx context.Context, idToken string) (platformUser, error) {
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, "http://localhost/api/auth/me", nil)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, "http://oidc.internal/verify", nil)
 	if err != nil {
 		return platformUser{}, err
 	}
@@ -364,34 +369,32 @@ func (s *apiServer) resolveOIDCLoginUser(ctx context.Context, idToken string) (p
 	if err != nil {
 		return platformUser{}, err
 	}
-	if !ok || strings.TrimSpace(p.AuthType) != "oidc_jwt" {
+	if !ok || p.AuthType != "oidc_jwt" {
 		return platformUser{}, fmt.Errorf("%w: token authentication failed", errOIDCUnauthorized)
 	}
-	if strings.TrimSpace(p.Subject) == "" {
-		return platformUser{}, fmt.Errorf("%w: token missing user identity", errOIDCUnauthorized)
-	}
-	if strings.TrimSpace(p.Email) == "" {
-		return platformUser{}, fmt.Errorf("%w: token missing email", errOIDCUnauthorized)
-	}
-	role := strings.TrimSpace(p.Role)
-	if role == "" {
-		role = roleUser
-	}
-
-	u, ok, err := s.platform.GetUser(ctx, p.Subject)
-	if err != nil {
-		return platformUser{}, err
-	}
-	if ok {
-		return u, nil
+	if p.Subject == "" || p.Email == "" {
+		return platformUser{}, fmt.Errorf("%w: token missing identity", errOIDCUnauthorized)
 	}
 
 	return platformUser{
-		ID:        strings.TrimSpace(p.Subject),
-		Email:     strings.TrimSpace(p.Email),
-		Role:      role,
-		Namespace: strings.TrimSpace(p.Namespace),
+		ID:        p.Subject,
+		Email:     p.Email,
+		Role:      p.Role,
+		Namespace: p.Namespace,
 	}, nil
+}
+
+func oidcAuditResource(idToken string) string {
+	claims := jwt.MapClaims{}
+	if _, _, err := jwt.NewParser().ParseUnverified(strings.TrimSpace(idToken), claims); err != nil {
+		return "unknown"
+	}
+	email, _ := claims["email"].(string)
+	email = strings.ToLower(strings.TrimSpace(email))
+	if email == "" {
+		return "unknown"
+	}
+	return email
 }
 
 func requestIP(r *http.Request) string {

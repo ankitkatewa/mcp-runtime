@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -164,4 +165,29 @@ func TestHandleOIDCLoginInvalidOIDCToken(t *testing.T) {
 	if rec.Code != http.StatusUnauthorized {
 		t.Fatalf("status = %d, want %d", rec.Code, http.StatusUnauthorized)
 	}
+}
+
+func TestOIDCAuditResourceUsesUnverifiedEmailClaim(t *testing.T) {
+	idToken := unsignedTestJWT(`{"email":"USER@example.COM"}`)
+	if got := oidcAuditResource(idToken); got != "user@example.com" {
+		t.Fatalf("oidcAuditResource() = %q, want user@example.com", got)
+	}
+}
+
+func TestOIDCAuditResourceFallsBackToUnknown(t *testing.T) {
+	for _, idToken := range []string{
+		"",
+		"not-a-jwt",
+		unsignedTestJWT(`{"sub":"user-123"}`),
+	} {
+		if got := oidcAuditResource(idToken); got != "unknown" {
+			t.Fatalf("oidcAuditResource(%q) = %q, want unknown", idToken, got)
+		}
+	}
+}
+
+func unsignedTestJWT(payload string) string {
+	header := base64.RawURLEncoding.EncodeToString([]byte(`{"alg":"none"}`))
+	body := base64.RawURLEncoding.EncodeToString([]byte(payload))
+	return header + "." + body + ".sig"
 }

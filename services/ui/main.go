@@ -372,7 +372,7 @@ func handleLogin(apiKey, upstreamAPIKey, apiUpstream string, store *uiSessionSto
 			if oidcLoginHook != nil {
 				p, token, expiresAt, verifyErr = oidcLoginHook(r.Context(), apiUpstream, idToken)
 			} else {
-				p, token, expiresAt, verifyErr = loginOIDCWithAPI(r.Context(), apiUpstream, idToken)
+				p, token, expiresAt, verifyErr = loginOIDCSession(r.Context(), apiUpstream, idToken)
 			}
 			if verifyErr != nil {
 				failures := loginAttempts.recordFailure(clientID)
@@ -423,6 +423,22 @@ func handleLogin(apiKey, upstreamAPIKey, apiUpstream string, store *uiSessionSto
 		http.SetCookie(w, newSessionCookie(r, sess.ID, sess.ExpiresAt))
 		writeJSON(w, http.StatusOK, map[string]any{"authenticated": true, "principal": sess.Principal})
 	}
+}
+
+func loginOIDCSession(ctx context.Context, apiUpstream, idToken string) (sessionPrincipal, string, time.Time, error) {
+	p, token, expiresAt, err := loginOIDCWithAPI(ctx, apiUpstream, idToken)
+	if err == nil {
+		return p, token, expiresAt, nil
+	}
+	var statusErr *oidcLoginStatusError
+	if !errors.As(err, &statusErr) || statusErr.StatusCode != http.StatusServiceUnavailable {
+		return sessionPrincipal{}, "", time.Time{}, err
+	}
+	p, verifyErr := verifyOIDCTokenWithAPI(ctx, apiUpstream, idToken)
+	if verifyErr != nil {
+		return sessionPrincipal{}, "", time.Time{}, verifyErr
+	}
+	return p, idToken, idTokenExpiry(idToken), nil
 }
 
 func loginPasswordWithAPI(ctx context.Context, apiUpstream, email, password string) (sessionPrincipal, string, error) {
@@ -480,6 +496,35 @@ func loginPasswordWithAPI(ctx context.Context, apiUpstream, email, password stri
 	}, payload.AccessToken, nil
 }
 
+func idTokenExpiry(idToken string) time.Time {
+	parts := strings.Split(strings.TrimSpace(idToken), ".")
+	if len(parts) < 2 {
+		return time.Time{}
+	}
+	payloadBytes, err := base64.RawURLEncoding.DecodeString(parts[1])
+	if err != nil {
+		return time.Time{}
+	}
+	var claims struct {
+		Exp int64 `json:"exp"`
+	}
+	if err := json.Unmarshal(payloadBytes, &claims); err != nil {
+		return time.Time{}
+	}
+	if claims.Exp <= 0 {
+		return time.Time{}
+	}
+	return time.Unix(claims.Exp, 0).UTC()
+}
+
+type oidcLoginStatusError struct {
+	StatusCode int
+}
+
+func (e *oidcLoginStatusError) Error() string {
+	return fmt.Sprintf("oidc login failed: status %d", e.StatusCode)
+}
+
 func loginOIDCWithAPI(ctx context.Context, apiUpstream, idToken string) (sessionPrincipal, string, time.Time, error) {
 	oidcURL, err := apiUpstreamURL(apiUpstream, "api", "auth", "oidc")
 	if err != nil {
@@ -506,7 +551,7 @@ func loginOIDCWithAPI(ctx context.Context, apiUpstream, idToken string) (session
 
 	if resp.StatusCode != http.StatusOK {
 		_, _ = io.Copy(io.Discard, resp.Body)
-		return sessionPrincipal{}, "", time.Time{}, fmt.Errorf("oidc login failed: status %d", resp.StatusCode)
+		return sessionPrincipal{}, "", time.Time{}, &oidcLoginStatusError{StatusCode: resp.StatusCode}
 	}
 
 	var payload struct {
@@ -538,6 +583,50 @@ func loginOIDCWithAPI(ctx context.Context, apiUpstream, idToken string) (session
 		Email:    strings.TrimSpace(payload.User.Email),
 		AuthType: "platform_jwt",
 	}, strings.TrimSpace(payload.AccessToken), expiresAt, nil
+}
+
+func verifyOIDCTokenWithAPI(ctx context.Context, apiUpstream, idToken string) (sessionPrincipal, error) {
+	meURL, err := apiUpstreamURL(apiUpstream, "api", "auth", "me")
+	if err != nil {
+		return sessionPrincipal{}, err
+	}
+	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
+	defer cancel()
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, meURL, nil)
+	if err != nil {
+		return sessionPrincipal{}, err
+	}
+	req.Header.Set("authorization", "Bearer "+idToken)
+
+	resp, err := authHTTPClient.Do(req)
+	if err != nil {
+		return sessionPrincipal{}, err
+	}
+	defer drainAndClose(resp.Body)
+
+	if resp.StatusCode != http.StatusOK {
+		_, _ = io.Copy(io.Discard, resp.Body)
+		return sessionPrincipal{}, fmt.Errorf("auth check failed: status %d", resp.StatusCode)
+	}
+
+	var payload struct {
+		Authenticated bool             `json:"authenticated"`
+		Principal     sessionPrincipal `json:"principal"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&payload); err != nil {
+		return sessionPrincipal{}, err
+	}
+	if !payload.Authenticated {
+		return sessionPrincipal{}, errors.New("not authenticated")
+	}
+	if strings.TrimSpace(payload.Principal.Role) == "" {
+		payload.Principal.Role = "user"
+	}
+	if payload.Principal.AuthType == "" {
+		payload.Principal.AuthType = "oidc_jwt"
+	}
+	return payload.Principal, nil
 }
 
 func apiUpstreamURL(apiUpstream string, parts ...string) (string, error) {

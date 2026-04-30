@@ -2,6 +2,8 @@ package main
 
 import (
 	"context"
+	"encoding/base64"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -261,6 +263,67 @@ func TestHandleLoginWithOIDCTokenCapsSessionToTokenExpiry(t *testing.T) {
 	exp := now.Add(30 * time.Minute)
 	if sess.ExpiresAt.After(exp.Add(time.Second)) || sess.ExpiresAt.Before(exp.Add(-1*time.Second)) {
 		t.Fatalf("session expiry = %s, want %s", sess.ExpiresAt.Format(time.RFC3339), exp.Format(time.RFC3339))
+	}
+}
+
+func TestLoginOIDCSessionFallsBackToTokenVerificationWhenPlatformStoreUnavailable(t *testing.T) {
+	now := time.Now().UTC().Add(2 * time.Minute)
+	exp := now.Add(30 * time.Minute)
+	payload := fmt.Sprintf(`{"exp":%d}`, exp.Unix())
+	idToken := "eyJhbGciOiJub25lIn0." + base64.RawURLEncoding.EncodeToString([]byte(payload)) + ".sig"
+
+	var paths []string
+	previousClient := authHTTPClient
+	authHTTPClient = &http.Client{Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
+		paths = append(paths, r.URL.Path)
+		switch r.URL.Path {
+		case "/api/auth/oidc":
+			if r.Method != http.MethodPost {
+				t.Fatalf("oidc method = %s, want POST", r.Method)
+			}
+			body, err := io.ReadAll(r.Body)
+			if err != nil {
+				t.Fatalf("read oidc body: %v", err)
+			}
+			if !strings.Contains(string(body), idToken) {
+				t.Fatalf("oidc body = %s, want id token", string(body))
+			}
+			return &http.Response{
+				StatusCode: http.StatusServiceUnavailable,
+				Header:     http.Header{"content-type": []string{"application/json"}},
+				Body:       io.NopCloser(strings.NewReader(`{"error":"platform identity database not configured"}`)),
+			}, nil
+		case "/api/auth/me":
+			if got := r.Header.Get("authorization"); got != "Bearer "+idToken {
+				t.Fatalf("fallback authorization = %q, want bearer id token", got)
+			}
+			return &http.Response{
+				StatusCode: http.StatusOK,
+				Header:     http.Header{"content-type": []string{"application/json"}},
+				Body:       io.NopCloser(strings.NewReader(`{"authenticated":true,"principal":{"role":"user","subject":"user-123","email":"user@example.com"}}`)),
+			}, nil
+		default:
+			t.Fatalf("unexpected request path %q", r.URL.Path)
+		}
+		return nil, nil
+	})}
+	t.Cleanup(func() { authHTTPClient = previousClient })
+
+	p, token, expiresAt, err := loginOIDCSession(context.Background(), "http://api.example", idToken)
+	if err != nil {
+		t.Fatalf("loginOIDCSession() error = %v", err)
+	}
+	if token != idToken {
+		t.Fatalf("token = %q, want original id token", token)
+	}
+	if p.AuthType != "oidc_jwt" || p.Subject != "user-123" || p.Email != "user@example.com" {
+		t.Fatalf("principal = %+v", p)
+	}
+	if expiresAt.After(exp.Add(time.Second)) || expiresAt.Before(exp.Add(-time.Second)) {
+		t.Fatalf("session expiry = %s, want %s", expiresAt.Format(time.RFC3339), exp.Format(time.RFC3339))
+	}
+	if len(paths) != 2 || paths[0] != "/api/auth/oidc" || paths[1] != "/api/auth/me" {
+		t.Fatalf("request paths = %v, want oidc exchange then auth/me fallback", paths)
 	}
 }
 
