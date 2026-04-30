@@ -96,7 +96,7 @@ CLI parity: `mcp-runtime access grant` and `mcp-runtime access session` cover th
 ## Operating the stack
 
 ```bash
-# Health + events
+# Health + Kubernetes events
 mcp-runtime sentinel status
 mcp-runtime sentinel events
 
@@ -112,6 +112,10 @@ mcp-runtime sentinel port-forward grafana
 mcp-runtime sentinel restart gateway
 mcp-runtime sentinel restart --all
 ```
+
+`sentinel events` is a Kubernetes event view for the `mcp-sentinel` namespace.
+Use `/api/events` or `/api/events/filter` when you need the request/audit
+events emitted by `mcp-proxy`.
 
 See [CLI → sentinel](cli.md#sentinel) for component keys and flag details.
 

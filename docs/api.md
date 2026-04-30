@@ -212,6 +212,10 @@ Overview statistics for the dashboard cards.
 GET /api/dashboard/summary
 ```
 
+Requires admin authentication. For direct curl/API clients, send an
+`x-api-key` value from `API_KEYS`; `UI_API_KEY` is for browser login unless it
+is also present in `API_KEYS`.
+
 Returns: `total_events`, `active_servers`, `active_grants`, `active_sessions`, `latest_source`, `last_event_type`, `last_event_time`.
 
 ## Runtime Governance API

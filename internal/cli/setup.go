@@ -2098,6 +2098,7 @@ func renderAnalyticsSecretManifest(kubectl KubectlRunner) (string, error) {
 	if err != nil {
 		return "", wrapWithSentinel(ErrRenderSecretManifestFailed, err, fmt.Sprintf("failed to read analytics secrets: %v", err))
 	}
+	apiKeys = ensureCSVIncludes(apiKeys, uiAPIKey)
 	grafanaPassword, err := existingSecretDataValueOrRandom(kubectl, defaultAnalyticsNamespace, "mcp-sentinel-secrets", "GRAFANA_ADMIN_PASSWORD", 16)
 	if err != nil {
 		return "", wrapWithSentinel(ErrRenderSecretManifestFailed, err, fmt.Sprintf("failed to read analytics secrets: %v", err))
@@ -2173,6 +2174,29 @@ func renderAnalyticsSecretManifest(kubectl KubectlRunner) (string, error) {
 		return "", wrapWithSentinel(ErrRenderSecretManifestFailed, err, fmt.Sprintf("failed to render analytics secrets: %v", err))
 	}
 	return string(rendered), nil
+}
+
+func ensureCSVIncludes(csv, value string) string {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return strings.TrimSpace(csv)
+	}
+	parts := make([]string, 0)
+	found := false
+	for _, part := range strings.Split(csv, ",") {
+		part = strings.TrimSpace(part)
+		if part == "" {
+			continue
+		}
+		if part == value {
+			found = true
+		}
+		parts = append(parts, part)
+	}
+	if !found {
+		parts = append(parts, value)
+	}
+	return strings.Join(parts, ",")
 }
 
 func ensureAnalyticsImagePullSecret(kubectl KubectlRunner) (string, error) {

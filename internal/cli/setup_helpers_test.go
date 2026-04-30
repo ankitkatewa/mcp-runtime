@@ -43,6 +43,16 @@ func secretStringDataFromManifest(t *testing.T, manifest string) map[string]stri
 	return payload.StringData
 }
 
+func csvHasValue(csv, value string) bool {
+	value = strings.TrimSpace(value)
+	for _, part := range strings.Split(csv, ",") {
+		if strings.TrimSpace(part) == value {
+			return true
+		}
+	}
+	return false
+}
+
 func TestGetOperatorImage(t *testing.T) {
 	origOverride := DefaultCLIConfig.OperatorImage
 	origKubectl := kubectlClient
@@ -574,8 +584,8 @@ func TestRenderAnalyticsSecretManifestReusesExistingAPIKeys(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	data := secretStringDataFromManifest(t, manifest)
-	if data["API_KEYS"] != "api-key" {
-		t.Fatalf("expected existing API key to be reused, got %q", data["API_KEYS"])
+	if data["API_KEYS"] != "api-key,ui-key" {
+		t.Fatalf("expected existing API key list to include UI key, got %q", data["API_KEYS"])
 	}
 	if data["UI_API_KEY"] != "ui-key" {
 		t.Fatalf("expected existing UI API key to be reused, got %q", data["UI_API_KEY"])
@@ -650,6 +660,9 @@ func TestRenderAnalyticsSecretManifestGeneratesKeysWhenMissing(t *testing.T) {
 	if data["UI_API_KEY"] == "" {
 		t.Fatalf("expected generated UI API key, got %q", manifest)
 	}
+	if !csvHasValue(data["API_KEYS"], data["UI_API_KEY"]) {
+		t.Fatalf("expected UI_API_KEY to be included in API_KEYS, got API_KEYS=%q UI_API_KEY=%q", data["API_KEYS"], data["UI_API_KEY"])
+	}
 	if data["GRAFANA_ADMIN_PASSWORD"] == "" {
 		t.Fatalf("expected generated grafana password, got %q", manifest)
 	}
@@ -661,6 +674,28 @@ func TestRenderAnalyticsSecretManifestGeneratesKeysWhenMissing(t *testing.T) {
 	}
 	if data["PLATFORM_JWT_SECRET"] == "" {
 		t.Fatalf("expected generated platform jwt secret, got %q", manifest)
+	}
+}
+
+func TestEnsureCSVIncludes(t *testing.T) {
+	tests := []struct {
+		name  string
+		csv   string
+		value string
+		want  string
+	}{
+		{name: "appends missing value", csv: "api-key", value: "ui-key", want: "api-key,ui-key"},
+		{name: "preserves existing value", csv: "api-key, ui-key", value: "ui-key", want: "api-key,ui-key"},
+		{name: "uses value when csv empty", csv: "", value: "ui-key", want: "ui-key"},
+		{name: "trims empty value", csv: "api-key", value: " ", want: "api-key"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := ensureCSVIncludes(tt.csv, tt.value); got != tt.want {
+				t.Fatalf("ensureCSVIncludes(%q, %q) = %q, want %q", tt.csv, tt.value, got, tt.want)
+			}
+		})
 	}
 }
 

@@ -107,14 +107,22 @@ so the documented containerd mirror matches the image host exactly.
 - Grafana: `/grafana` · Prometheus: `/prometheus` · API base: `http://localhost:18080/api`
 - MCP (test): `http://localhost:18080/demo-one/mcp`, `http://localhost:18080/demo-two/mcp`
 - PII redaction: `config/ingress/overlays/http` with Traefik plugin `pii-redactor@file`. Reapply: `./bin/mcp-runtime setup --test-mode --ingress-manifest config/ingress/overlays/http`. The plugin is built from `services/traefik-plugins/pii-redactor` (local `localplugins` mount) so a published image tag is not required for local dev.
-- **API key:**
+- **API keys:**
 
 ```bash
+# Direct Sentinel API / x-api-key requests.
+kubectl get secret mcp-sentinel-secrets -n mcp-sentinel \
+  -o jsonpath='{.data.API_KEYS}' | base64 -d
+
+# Browser/API-key login through the UI.
 kubectl get secret mcp-sentinel-secrets -n mcp-sentinel \
   -o jsonpath='{.data.UI_API_KEY}' | base64 -d
 ```
 
-  Keep `API_KEYS` and `UI_API_KEY` aligned; copy the secret to `mcp-servers` if MCP servers need it.
+  `setup` should keep `UI_API_KEY` included in the comma-separated `API_KEYS`
+  list. If direct `/api/...` curl calls return `401`, run
+  `./bin/mcp-runtime cluster doctor`; it flags a UI/API key mismatch. Roll the
+  API and UI deployments after patching `mcp-sentinel-secrets`.
 
 - **Platform admin bootstrap (one-shot):**
 
@@ -148,13 +156,45 @@ kubectl patch secret mcp-sentinel-secrets -n mcp-sentinel --type merge -p '{"str
 - **Port mismatch:** the bundled Go example listens on `8088` by default; align `MCPServer` `port` / `servicePort` and container `PORT` if you overrode them.
 - **Analytics 401:** use gateway/ingest URL and key, not the app’s random env. Example: `ANALYTICS_INGEST_URL=http://mcp-sentinel-ingest.mcp-sentinel.svc.cluster.local:8081/events` and `ANALYTICS_API_KEY` from `mcp-sentinel-secrets` (`API_KEYS` key).
 - **Secret not found in workload namespace:** copy `mcp-sentinel-secrets` or use a shared secret reference.
-- **Dashboard / API 401:** align `API_KEYS` and `UI_API_KEY` and roll the API deployment.
+- **Dashboard / API 401:** direct `x-api-key` curl calls use `API_KEYS`; browser login uses `UI_API_KEY`. Keep `UI_API_KEY` present in `API_KEYS`, then roll the API and UI deployments after secret changes.
 - **Ingress / routes:** `kubectl get ingress -A` and confirm paths match the gateway and demo servers you expect.
 - **Private / HTTP in-cluster registry / k3s:** Pull and push can fail with `https` vs `http` or `registry.local` DNS on nodes. See **k3s and HTTP registry (config files)** below, set **`MCP_REGISTRY_*`** before `pipeline generate` when you want `ClusterIP:port` in manifests, and raise **`MCP_DEPLOYMENT_TIMEOUT`** if setup rollouts time out on slow first pulls.
 - **Prod DNS / ACME:** with `MCP_PLATFORM_DOMAIN=example.com`, setup derives `registry.example.com`, `mcp.example.com`, and `platform.example.com`. All three public DNS records must point at the ingress IP and port 80 must reach Traefik for HTTP-01. If cert-manager reports NXDOMAIN, verify from outside and inside the cluster: `getent hosts registry.example.com`, `getent hosts mcp.example.com`, `getent hosts platform.example.com`, and `kubectl run dns-check --rm -i --restart=Never --image=busybox:1.36 -- nslookup platform.example.com`.
 - **Platform UI 404 / wrong host:** when `MCP_PLATFORM_DOMAIN` (or `MCP_PLATFORM_INGRESS_HOST`) is set, setup applies a host-based ingress `mcp-sentinel-platform-ui` in `mcp-sentinel`. Verify with `kubectl get ingress mcp-sentinel-platform-ui -n mcp-sentinel -o yaml`; the rule should be host=`platform.<domain>` routing `/` to `mcp-sentinel-ui:8082` (and `/api`, `/grafana`, `/prometheus` to those services). If the dashboard returns Traefik default 404, check that DNS resolves `platform.<domain>` to the cluster ingress, then `kubectl logs -n traefik deploy/traefik --tail=120` for routing errors. The dev path-based gateway (`mcp-sentinel-gateway`) keeps working when `MCP_PLATFORM_DOMAIN` is unset.
 - **Prod registry 404 / image pulls say “not found”:** if `registry-cert` is Ready but pods fail to pull `registry.<domain>/<repo>:<tag>`, check the public registry route: `curl -k -i https://registry.<domain>/v2/`. Expected is HTTP 200 with `docker-distribution-api-version: registry/2.0`; Traefik `404 page not found` means the ingress/router is not active. Check `kubectl logs -n traefik deploy/traefik --tail=120` and `kubectl get ingress registry -n registry -o yaml`. In prod, the registry ingress must not reference the dev-only `pii-redactor@file` middleware.
 - **Prod MCP server URLs:** prefer path-based public routing for clients: `https://mcp.<domain>/<server-name>/mcp`. Use `spec.publicPathPrefix: <server-name>` and set the server’s `MCP_PATH` to `/<server-name>/mcp`; avoid examples that require a custom `Host` header such as `go.example.local`.
+
+### MCP server pod / sidecar checks
+
+Use these when a server is deployed but gateway behavior, grants, or analytics
+look wrong:
+
+```bash
+SERVER=go-example-mcp
+CONTAINER=go-example-mcp
+
+kubectl get mcpservers -n mcp-servers
+kubectl get pods -n mcp-servers -o wide
+kubectl get pods -n mcp-servers \
+  -o jsonpath='{range .items[*]}{.metadata.name}{"\t"}{range .spec.containers[*]}{.name}{","}{end}{"\n"}{end}'
+
+POD="$(kubectl get pods -n mcp-servers -l app="$SERVER" -o jsonpath='{.items[0].metadata.name}')"
+kubectl describe pod -n mcp-servers "$POD"
+kubectl logs -n mcp-servers "$POD" -c "$CONTAINER"
+kubectl logs -n mcp-servers "$POD" -c mcp-gateway
+./bin/mcp-runtime server policy inspect "$SERVER" --namespace mcp-servers
+kubectl get mcpaccessgrant,mcpagentsession -n mcp-servers -o wide
+```
+
+The sidecar container is named `mcp-gateway`; it runs the `mcp-proxy`
+image/process. Many runtime images are distroless, so `/bin/sh` and
+`/bin/bash` may not exist. Prefer logs/describe, or attach a debug container:
+
+```bash
+kubectl debug -it -n mcp-servers "pod/$POD" \
+  --target="$CONTAINER" \
+  --image=busybox:1.36 -- sh
+```
 
 ### k3s and HTTP registry (dev / test without registry TLS)
 
@@ -280,8 +320,18 @@ curl -i -H "content-type: application/json" \
      -H "accept: application/json, text/event-stream" \
      -H "Mcp-Protocol-Version: $PROTO" \
      -H "Mcp-Session-Id: <session>" \
+     -d '{"jsonrpc":"2.0","method":"notifications/initialized"}' $BASE
+# then
+curl -i -H "content-type: application/json" \
+     -H "accept: application/json, text/event-stream" \
+     -H "Mcp-Protocol-Version: $PROTO" \
+     -H "Mcp-Session-Id: <session>" \
      -d '{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"add","arguments":{"a":2,"b":3}}}' $BASE
 ```
+
+If a just-created `MCPAgentSession` returns `session_not_found`, first confirm
+`server policy inspect` shows the session, then allow a few seconds for the
+`mcp-gateway` sidecar to reload its mounted policy file.
 
 **Bulk (Python)** — fires many `tools/call` events for ingest testing:
 

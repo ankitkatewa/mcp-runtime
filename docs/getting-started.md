@@ -224,6 +224,37 @@ kubectl rollout status deploy/go-example-mcp -n mcp-servers --timeout=180s
 ./bin/mcp-runtime server status --namespace mcp-servers
 ```
 
+Useful checks while iterating:
+
+```bash
+kubectl get mcpservers -n mcp-servers
+kubectl get pods -n mcp-servers -o wide
+kubectl get pods -n mcp-servers \
+  -o jsonpath='{range .items[*]}{.metadata.name}{"\t"}{range .spec.containers[*]}{.name}{","}{end}{"\n"}{end}'
+
+POD="$(
+  kubectl get pods -n mcp-servers -l app=go-example-mcp \
+    -o jsonpath='{.items[0].metadata.name}'
+)"
+
+kubectl describe pod -n mcp-servers "$POD"
+kubectl logs -n mcp-servers "$POD" -c go-example-mcp
+kubectl logs -n mcp-servers "$POD" -c mcp-gateway
+./bin/mcp-runtime server policy inspect go-example-mcp --namespace mcp-servers
+```
+
+The governed sidecar container is named `mcp-gateway`; it runs the
+`mcp-proxy` image/process and forwards to the app on `127.0.0.1`. The bundled
+Go example image is distroless, so `kubectl exec ... -- /bin/sh` and
+`/bin/bash` are expected to fail. Use logs/describe first, or attach a debug
+container when you need a shell in the pod namespace:
+
+```bash
+kubectl debug -it -n mcp-servers "pod/$POD" \
+  --target=go-example-mcp \
+  --image=busybox:1.36 -- sh
+```
+
 Apply an access grant and session for the local request:
 
 ```bash
@@ -267,6 +298,9 @@ kubectl apply -f /tmp/go-example-access.yaml
 until ./bin/mcp-runtime server policy inspect go-example-mcp --namespace mcp-servers | grep -q local-session; do
   sleep 2
 done
+
+# The proxy sidecar reloads the rendered policy file on a short polling loop.
+sleep 6
 ```
 
 Make a local MCP JSON-RPC request through Traefik and the Sentinel gateway:
@@ -295,25 +329,54 @@ curl -sS \
   -H "X-MCP-Human-ID: local-user" \
   -H "X-MCP-Agent-ID: local-agent" \
   -H "X-MCP-Agent-Session: local-session" \
+  -d '{"jsonrpc":"2.0","method":"notifications/initialized"}' \
+  "$BASE" >/dev/null
+
+curl -sS \
+  -H "content-type: application/json" \
+  -H "accept: application/json, text/event-stream" \
+  -H "Mcp-Protocol-Version: $PROTO" \
+  -H "Mcp-Session-Id: $SESSION" \
+  -H "X-MCP-Human-ID: local-user" \
+  -H "X-MCP-Agent-ID: local-agent" \
+  -H "X-MCP-Agent-Session: local-session" \
   -d '{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"add","arguments":{"a":2,"b":3}}}' \
+  "$BASE" | jq .
+
+curl -sS \
+  -H "content-type: application/json" \
+  -H "accept: application/json, text/event-stream" \
+  -H "Mcp-Protocol-Version: $PROTO" \
+  -H "Mcp-Session-Id: $SESSION" \
+  -H "X-MCP-Human-ID: local-user" \
+  -H "X-MCP-Agent-ID: local-agent" \
+  -H "X-MCP-Agent-Session: local-session" \
+  -d '{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"upper","arguments":{"message":"hello world"}}}' \
   "$BASE" | jq .
 ```
 
-You should see a successful `tools/call` response containing `5`. Then verify
-Sentinel observed the request:
+You should see successful `tools/call` responses containing `5` and
+`HELLO WORLD`. Then verify Sentinel health and query the analytics API:
 
 ```bash
 ./bin/mcp-runtime sentinel status
 ./bin/mcp-runtime sentinel events
 
-UI_API_KEY="$(
+API_KEY="$(
   kubectl get secret mcp-sentinel-secrets -n mcp-sentinel \
-    -o jsonpath='{.data.UI_API_KEY}' | base64 -d
+    -o jsonpath='{.data.API_KEYS}' | base64 -d | cut -d, -f1
 )"
 
-curl -sS -H "x-api-key: $UI_API_KEY" \
+curl -sS -H "x-api-key: $API_KEY" \
   http://localhost:18080/api/dashboard/summary | jq .
+
+curl -sS -H "x-api-key: $API_KEY" \
+  "http://localhost:18080/api/events/filter?server=go-example-mcp&tool_name=add&limit=5" | jq .
 ```
+
+`mcp-runtime sentinel events` shows Kubernetes events for the Sentinel
+namespace. Use `/api/dashboard/summary`, `/api/events`, or
+`/api/events/filter` to verify request analytics.
 
 ## 4. Install the platform stack
 
