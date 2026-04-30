@@ -837,7 +837,7 @@ func TestCheckResourceReadiness(t *testing.T) {
 		assertEqual(t, "deploymentReady", readiness.Deployment, false)
 		assertEqual(t, "serviceReady", readiness.Service, false)
 		assertEqual(t, "ingressReady", readiness.Ingress, false)
-		assertEqual(t, "policyReady", readiness.Policy, true)
+		assertEqual(t, "policyReady", readiness.Policy, false)
 		assertEqual(t, "canaryReady", readiness.Canary, true)
 	})
 }
@@ -948,6 +948,7 @@ func TestUpdateStatus(t *testing.T) {
 
 func TestDeterminePhase(t *testing.T) {
 	t.Run("succeeds with valid phase", func(t *testing.T) {
+		gatewayDisabledMCP := &mcpv1alpha1.MCPServer{}
 		phase, allReady := determinePhase(resourceReadiness{
 			Deployment: true,
 			Service:    true,
@@ -955,7 +956,7 @@ func TestDeterminePhase(t *testing.T) {
 			Gateway:    true,
 			Policy:     true,
 			Canary:     true,
-		})
+		}, gatewayDisabledMCP)
 		assertEqual(t, "phase", phase, "Ready")
 		assertEqual(t, "allReady", allReady, true)
 	})

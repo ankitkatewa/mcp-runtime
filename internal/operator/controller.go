@@ -139,7 +139,7 @@ func (r *MCPServerReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 		return ctrl.Result{Requeue: false}, err
 	}
 
-	phase, allReady := determinePhase(readiness)
+	phase, allReady := determinePhase(readiness, mcpServer)
 	r.updateStatus(ctx, mcpServer, phase, "All resources reconciled", readiness)
 
 	logger.Info("Successfully reconciled MCPServer", "name", mcpServer.Name, "phase", phase)
@@ -299,7 +299,7 @@ func (r *MCPServerReconciler) checkResourceReadiness(ctx context.Context, mcpSer
 		return resourceReadiness{}, err
 	}
 
-	gatewayReady := true
+	gatewayReady := false
 	if gatewayEnabled(mcpServer) {
 		gatewayReady = deploymentReady
 	}
@@ -314,8 +314,14 @@ func (r *MCPServerReconciler) checkResourceReadiness(ctx context.Context, mcpSer
 	}, nil
 }
 
-func determinePhase(readiness resourceReadiness) (string, bool) {
-	allReady := readiness.Deployment && readiness.Service && readiness.Ingress && readiness.Gateway && readiness.Policy && readiness.Canary
+func determinePhase(readiness resourceReadiness, mcpServer *mcpv1alpha1.MCPServer) (string, bool) {
+	var allReady bool
+	if gatewayEnabled(mcpServer) {
+		allReady = readiness.Deployment && readiness.Service && readiness.Ingress && readiness.Gateway && readiness.Policy && readiness.Canary
+	} else {
+		allReady = readiness.Deployment && readiness.Service && readiness.Ingress && readiness.Canary
+
+	}
 	if allReady {
 		return "Ready", true
 	}
@@ -993,7 +999,7 @@ func canaryEnabled(mcpServer *mcpv1alpha1.MCPServer) bool {
 
 func (r *MCPServerReconciler) checkPolicyConfigMapReady(ctx context.Context, mcpServer *mcpv1alpha1.MCPServer) (bool, error) {
 	if !gatewayEnabled(mcpServer) {
-		return true, nil
+		return false, nil
 	}
 	configMap := &corev1.ConfigMap{}
 	if err := r.Get(ctx, types.NamespacedName{Name: gatewayPolicyConfigMapName(mcpServer.Name), Namespace: mcpServer.Namespace}, configMap); err != nil {
