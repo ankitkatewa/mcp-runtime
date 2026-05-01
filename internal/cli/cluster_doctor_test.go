@@ -930,6 +930,76 @@ func TestCheckOperatorRecentReconcileErrors(t *testing.T) {
 	}
 }
 
+func TestCheckMCPServerReconcileSmoke(t *testing.T) {
+	t.Run("waits for deployment rollout readiness", func(t *testing.T) {
+		sawRollout := false
+		mock := &MockExecutor{
+			CommandFunc: func(spec ExecSpec) *MockCommand {
+				switch {
+				case contains(spec.Args, "apply"):
+					return &MockCommand{}
+				case contains(spec.Args, "rollout"):
+					sawRollout = true
+					if !contains(spec.Args, "--timeout=2m30s") {
+						t.Fatalf("rollout status args %v missing timeout", spec.Args)
+					}
+					return &MockCommand{}
+				case contains(spec.Args, "get"):
+					return &MockCommand{OutputData: []byte("doctor-smoke")}
+				case contains(spec.Args, "delete"):
+					return &MockCommand{}
+				}
+				return &MockCommand{OutputErr: fmt.Errorf("unexpected command: %v", spec.Args)}
+			},
+		}
+		kubectl := &KubectlClient{exec: mock, validators: nil}
+
+		check := checkMCPServerReconcileSmoke(kubectl, "mcp-servers")
+		if !check.OK {
+			t.Fatalf("expected OK, got detail=%q remedy=%q", check.Detail, check.Remedy)
+		}
+		if !sawRollout {
+			t.Fatal("expected smoke check to wait for deployment rollout readiness")
+		}
+		if !strings.Contains(check.Detail, "ready deployment/service/ingress") {
+			t.Fatalf("detail should mention ready deployment resources, got %q", check.Detail)
+		}
+	})
+
+	t.Run("fails when deployment rollout does not become ready", func(t *testing.T) {
+		mock := &MockExecutor{
+			CommandFunc: func(spec ExecSpec) *MockCommand {
+				switch {
+				case contains(spec.Args, "apply"):
+					return &MockCommand{}
+				case contains(spec.Args, "rollout"):
+					return &MockCommand{
+						OutputData: []byte("deployment \"doctor-smoke\" exceeded its progress deadline"),
+						OutputErr:  errors.New("rollout timed out"),
+					}
+				case contains(spec.Args, "get"):
+					return &MockCommand{OutputData: []byte("doctor-smoke")}
+				case contains(spec.Args, "delete"):
+					return &MockCommand{}
+				}
+				return &MockCommand{OutputErr: fmt.Errorf("unexpected command: %v", spec.Args)}
+			},
+		}
+		kubectl := &KubectlClient{exec: mock, validators: nil}
+
+		check := checkMCPServerReconcileSmoke(kubectl, "mcp-servers")
+		if check.OK {
+			t.Fatalf("expected failure when rollout fails; detail=%q", check.Detail)
+		}
+		if !strings.Contains(check.Detail, "deployment did not become ready") {
+			t.Fatalf("detail should describe rollout readiness failure, got %q", check.Detail)
+		}
+		if !strings.Contains(check.Detail, "exceeded its progress deadline") {
+			t.Fatalf("detail should include rollout output, got %q", check.Detail)
+		}
+	})
+}
+
 func TestCheckNodeCapacity(t *testing.T) {
 	t.Run("metrics-server healthy", func(t *testing.T) {
 		mock := &MockExecutor{

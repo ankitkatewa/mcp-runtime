@@ -424,7 +424,7 @@ Missing pieces are warnings, not errors — the command surfaces them so you can
 `./bin/mcp-runtime cluster doctor` runs post-install diagnostics:
 
 - Detects your distribution (k3s / kind / minikube / docker-desktop / generic).
-- Checks the installed MCP Runtime namespaces, CRDs, operator, Traefik ingress, registry, Sentinel, and MCPServer reconciliation path.
+- Checks the installed MCP Runtime namespaces, CRDs, operator, Traefik ingress, registry, Sentinel, and MCPServer reconciliation path, including readiness of the temporary smoke deployment.
 - Prefers k3s' bundled Traefik in `kube-system/traefik` when the active cluster is k3s, then falls back to the repo-managed `traefik/traefik` install.
 - Verifies registry reachability, registry image-pull smoke behavior, and common pod image-pull failures.
 - Reports `http: server gave HTTP response to HTTPS client` when kubelet/containerd tried HTTPS against the HTTP dev registry, including the affected pod and image where possible.

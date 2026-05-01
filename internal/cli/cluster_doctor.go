@@ -7,6 +7,8 @@ package cli
 // full list of per-distribution prerequisites.
 
 import (
+	"bufio"
+	"bytes"
 	"encoding/base64"
 	"fmt"
 	"strconv"
@@ -537,7 +539,10 @@ func checkOperatorRecentReconcileErrors(kubectl KubectlRunner) DoctorCheck {
 		}
 	}
 	patterns := []string{"reconciler error", "failed to reconcile", "error syncing"}
-	for _, line := range strings.Split(strings.ToLower(string(out)), "\n") {
+	scanner := bufio.NewScanner(bytes.NewReader(out))
+	scanner.Buffer(make([]byte, 0, 64*1024), 1024*1024)
+	for scanner.Scan() {
+		line := strings.ToLower(scanner.Text())
 		if strings.Contains(line, "doctor-smoke-") {
 			continue
 		}
@@ -551,6 +556,14 @@ func checkOperatorRecentReconcileErrors(kubectl KubectlRunner) DoctorCheck {
 				Detail: fmt.Sprintf("detected %q in recent operator logs", p),
 				Remedy: "inspect `kubectl logs -n mcp-runtime deploy/mcp-runtime-operator-controller-manager --since=10m`",
 			}
+		}
+	}
+	if err := scanner.Err(); err != nil {
+		return DoctorCheck{
+			Name:   "operator reconcile errors (last 10m)",
+			OK:     false,
+			Detail: fmt.Sprintf("failed scanning operator logs: %v", err),
+			Remedy: "inspect `kubectl logs -n mcp-runtime deploy/mcp-runtime-operator-controller-manager --since=10m`",
 		}
 	}
 	return DoctorCheck{
@@ -1562,6 +1575,14 @@ spec:
 			Remedy: "inspect operator reconcile errors and MCPServer status",
 		}
 	}
+	if err := waitForDoctorDeploymentReady(kubectl, name, namespace, 150*time.Second); err != nil {
+		return DoctorCheck{
+			Name:   "MCPServer reconcile smoke",
+			OK:     false,
+			Detail: fmt.Sprintf("deployment did not become ready: %v", err),
+			Remedy: "inspect operator reconcile and smoke deployment events",
+		}
+	}
 	if err := waitForDoctorResource(kubectl, "svc", name, namespace, 150*time.Second); err != nil {
 		return DoctorCheck{
 			Name:   "MCPServer reconcile smoke",
@@ -1581,12 +1602,16 @@ spec:
 	return DoctorCheck{
 		Name:   "MCPServer reconcile smoke",
 		OK:     true,
-		Detail: fmt.Sprintf("temporary MCPServer %s reconciled resources (deployment/service/ingress) using %s", name, imageSource),
+		Detail: fmt.Sprintf("temporary MCPServer %s reconciled ready deployment/service/ingress using %s", name, imageSource),
 	}
 }
 
 func waitForDoctorResource(kubectl KubectlRunner, resource, name, namespace string, timeout time.Duration) error {
-	deadline := time.Now().Add(timeout)
+	timeoutTimer := time.NewTimer(timeout)
+	defer timeoutTimer.Stop()
+	ticker := time.NewTicker(2 * time.Second)
+	defer ticker.Stop()
+
 	var lastErr error
 	for {
 		if _, err := readKubectlOutput(kubectl, []string{"get", resource, name, "-n", namespace, "-o", "jsonpath={.metadata.name}"}); err == nil {
@@ -1594,14 +1619,31 @@ func waitForDoctorResource(kubectl KubectlRunner, resource, name, namespace stri
 		} else {
 			lastErr = err
 		}
-		if time.Now().After(deadline) {
+		select {
+		case <-timeoutTimer.C:
 			if lastErr != nil {
 				return lastErr
 			}
 			return fmt.Errorf("%s/%s not found before timeout", resource, name)
+		case <-ticker.C:
 		}
-		time.Sleep(2 * time.Second)
 	}
+}
+
+func waitForDoctorDeploymentReady(kubectl KubectlRunner, name, namespace string, timeout time.Duration) error {
+	cmd, err := kubectl.CommandArgs([]string{"rollout", "status", "deployment/" + name, "-n", namespace, "--timeout=" + timeout.String()})
+	if err != nil {
+		return err
+	}
+	out, runErr := cmd.CombinedOutput()
+	if runErr == nil {
+		return nil
+	}
+	detail := strings.TrimSpace(string(out))
+	if detail == "" {
+		return runErr
+	}
+	return fmt.Errorf("%w: %s", runErr, detail)
 }
 
 func hasHTTP200Status(body string) bool {
