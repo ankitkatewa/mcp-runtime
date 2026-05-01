@@ -219,7 +219,7 @@ func (d SetupDeps) withDefaults(logger *zap.Logger) SetupDeps {
 
 // validateTLSSetupCLIFlags enforces ACME / internal-issuer mutual exclusion and
 // requires --with-tls when any TLS or cert-manager-related options are set.
-func validateTLSSetupCLIFlags(
+func ValidateTLSSetupCLIFlags(
 	tlsEnabled bool,
 	acmeEmailResolved, tlsCIResolved string,
 	acmeStagingResolved, skipCertManagerInstall bool,
@@ -347,7 +347,7 @@ will use to push and pull container images.`,
 
 // buildOperatorArgs constructs operator command-line arguments from flags.
 // Only includes flags that were explicitly set.
-func buildOperatorArgs(metricsAddr, probeAddr string, leaderElect, leaderElectChanged bool) []string {
+func BuildOperatorArgs(metricsAddr, probeAddr string, leaderElect, leaderElectChanged bool) []string {
 	var args []string
 
 	if metricsAddr != "" {
@@ -363,7 +363,7 @@ func buildOperatorArgs(metricsAddr, probeAddr string, leaderElect, leaderElectCh
 	return args
 }
 
-func validateStorageMode(mode string) error {
+func ValidateStorageMode(mode string) error {
 	switch mode {
 	case StorageModeDynamic, StorageModeHostpath:
 		return nil
@@ -372,8 +372,28 @@ func validateStorageMode(mode string) error {
 	}
 }
 
-func setupPlatform(logger *zap.Logger, plan SetupPlan) error {
+func SetupPlatform(logger *zap.Logger, plan SetupPlan) error {
 	return setupPlatformWithDeps(logger, plan, SetupDeps{}.withDefaults(logger))
+}
+
+func validateTLSSetupCLIFlags(
+	tlsEnabled bool,
+	acmeEmailResolved, tlsCIResolved string,
+	acmeStagingResolved, skipCertManagerInstall bool,
+) error {
+	return ValidateTLSSetupCLIFlags(tlsEnabled, acmeEmailResolved, tlsCIResolved, acmeStagingResolved, skipCertManagerInstall)
+}
+
+func buildOperatorArgs(metricsAddr, probeAddr string, leaderElect, leaderElectChanged bool) []string {
+	return BuildOperatorArgs(metricsAddr, probeAddr, leaderElect, leaderElectChanged)
+}
+
+func validateStorageMode(mode string) error {
+	return ValidateStorageMode(mode)
+}
+
+func setupPlatform(logger *zap.Logger, plan SetupPlan) error {
+	return SetupPlatform(logger, plan)
 }
 
 func setupPlatformWithDeps(logger *zap.Logger, plan SetupPlan, deps SetupDeps) error {

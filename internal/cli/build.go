@@ -24,7 +24,7 @@ import (
 // yamlMarshal is a test seam for yaml.Marshal.
 var yamlMarshal = yaml.Marshal
 
-func newBuildImageCmd(logger *zap.Logger) *cobra.Command {
+func NewBuildImageCmd(logger *zap.Logger) *cobra.Command {
 	var dockerfile string
 	var metadataFile string
 	var metadataDir string
@@ -50,6 +50,10 @@ func newBuildImageCmd(logger *zap.Logger) *cobra.Command {
 	cmd.Flags().StringVar(&context, "context", ".", "Build context directory")
 
 	return cmd
+}
+
+func newBuildImageCmd(logger *zap.Logger) *cobra.Command {
+	return NewBuildImageCmd(logger)
 }
 
 func buildImage(logger *zap.Logger, serverName, dockerfile, metadataFile, metadataDir, registryURL, tag, context string) error {

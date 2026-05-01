@@ -54,6 +54,11 @@ to target the cluster with kubectl and a kubeconfig (cluster admin path).`,
 	return cmd
 }
 
+// BindUseKubeFlag wires the shared --use-kube flag onto the command.
+func (m *AccessManager) BindUseKubeFlag(cmd *cobra.Command) {
+	cmd.PersistentFlags().BoolVar(&m.useKube, "use-kube", false, "Use kubectl and local kubeconfig instead of the platform API for supported commands")
+}
+
 func (m *AccessManager) newAccessGrantCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "grant",

@@ -31,7 +31,7 @@ Note: bootstrap --apply is automated for k3s only and must be executed on the k3
 
 			chosenProvider := provider
 			if chosenProvider == "" || chosenProvider == "auto" {
-				detectedProvider, err := detectProvider(kubectlClient)
+				detectedProvider, err := DetectProvider(kubectlClient)
 				if err != nil {
 					return err
 				}
@@ -39,7 +39,7 @@ Note: bootstrap --apply is automated for k3s only and must be executed on the k3
 			}
 			Info(fmt.Sprintf("Provider: %s", chosenProvider))
 
-			if err := runBootstrapPreflight(kubectlClient); err != nil {
+			if err := RunBootstrapPreflight(kubectlClient); err != nil {
 				return err
 			}
 
@@ -51,7 +51,7 @@ Note: bootstrap --apply is automated for k3s only and must be executed on the k3
 
 			switch chosenProvider {
 			case "k3s":
-				if err := bootstrapApplyK3s(kubectlClient); err != nil {
+				if err := BootstrapApplyK3s(kubectlClient); err != nil {
 					return err
 				}
 			case "rke2", "kubeadm", "generic":
@@ -71,7 +71,7 @@ Note: bootstrap --apply is automated for k3s only and must be executed on the k3
 	return cmd
 }
 
-func detectProvider(kubectl KubectlRunner) (string, error) {
+func DetectProvider(kubectl KubectlRunner) (string, error) {
 	out, err := kubectlOutput(kubectl, []string{"get", "nodes", "-o", "jsonpath={range .items[*]}{.status.nodeInfo.kubeletVersion}{\"\\n\"}{end}"})
 	if err != nil {
 		return "", wrapWithSentinel(ErrClusterNotAccessible, err, fmt.Sprintf("kubectl get nodes failed: %v", err))
@@ -87,7 +87,7 @@ func detectProvider(kubectl KubectlRunner) (string, error) {
 	}
 }
 
-func runBootstrapPreflight(kubectl KubectlRunner) error {
+func RunBootstrapPreflight(kubectl KubectlRunner) error {
 	Info("Preflight: kubectl connectivity")
 	if err := kubectl.Run([]string{"version", "--client=true"}); err != nil {
 		return wrapWithSentinel(ErrClusterNotAccessible, err, fmt.Sprintf("kubectl not available: %v", err))
@@ -137,7 +137,7 @@ func checkHasDefaultStorageClass(kubectl KubectlRunner) error {
 	return fmt.Errorf("no StorageClass annotated with storageclass.kubernetes.io/is-default-class=true")
 }
 
-func bootstrapApplyK3s(kubectl KubectlRunner) error {
+func BootstrapApplyK3s(kubectl KubectlRunner) error {
 	Info("Applying k3s addons: CoreDNS + local-path provisioner (if missing)")
 
 	// Apply only when the manifests exist on disk (k3s server).

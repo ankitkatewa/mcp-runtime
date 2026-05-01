@@ -76,6 +76,11 @@ func (c *KubectlClient) RunWithOutput(args []string, stdout, stderr io.Writer) e
 
 var kubectlClient = mustNewKubectlClient()
 
+// DefaultKubectlRunner returns the shared kubectl runner used by CLI commands.
+func DefaultKubectlRunner() KubectlRunner {
+	return kubectlClient
+}
+
 func mustNewKubectlClient() *KubectlClient {
 	client, err := NewKubectlClient(execExecutor)
 	if err != nil {

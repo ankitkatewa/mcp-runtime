@@ -10,5 +10,12 @@ import (
 
 // New returns the status command.
 func New(logger *zap.Logger) *cobra.Command {
-	return cli.NewStatusCmd(logger)
+	return &cobra.Command{
+		Use:   "status",
+		Short: "Show platform status",
+		Long:  "Show the overall status of the MCP platform",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return cli.ShowPlatformStatus(logger)
+		},
+	}
 }

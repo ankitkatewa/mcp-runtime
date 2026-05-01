@@ -50,7 +50,7 @@ func NewStatusCmd(logger *zap.Logger) *cobra.Command {
 	return cmd
 }
 
-func showPlatformStatus(logger *zap.Logger) error {
+func ShowPlatformStatus(logger *zap.Logger) error {
 	Header("MCP Platform Status")
 	DefaultPrinter.Println()
 
@@ -149,6 +149,10 @@ func showPlatformStatus(logger *zap.Logger) error {
 	Info("Use 'mcp-runtime server list' for detailed server info")
 
 	return nil
+}
+
+func showPlatformStatus(logger *zap.Logger) error {
+	return ShowPlatformStatus(logger)
 }
 
 func checkClusterStatusQuiet() error {

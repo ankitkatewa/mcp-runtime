@@ -98,6 +98,16 @@ For pushing images, use 'registry push'.`,
 	return cmd
 }
 
+// BindUseKubeFlag wires the shared --use-kube flag onto the command.
+func (m *ServerManager) BindUseKubeFlag(cmd *cobra.Command) {
+	cmd.PersistentFlags().BoolVar(&m.useKube, "use-kube", false, "Use kubectl and local kubeconfig instead of the platform API for supported commands")
+}
+
+// Logger exposes the manager logger to foldered command packages.
+func (m *ServerManager) Logger() *zap.Logger {
+	return m.logger
+}
+
 func newServerBuildCmd(logger *zap.Logger) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "build",

@@ -133,7 +133,7 @@ func NewSentinelCmdWithManager(mgr *SentinelManager) *cobra.Command {
 	return cmd
 }
 
-func sentinelComponentKeys() []string {
+func SentinelComponentKeys() []string {
 	keys := make([]string, 0, len(sentinelComponents))
 	for _, component := range sentinelComponents {
 		keys = append(keys, component.Key)
@@ -156,7 +156,7 @@ func findSentinelComponent(name string) (*sentinelComponent, error) {
 		}
 	}
 
-	return nil, newWithSentinel(nil, fmt.Sprintf("unknown sentinel component %q (use one of: %s)", name, strings.Join(sentinelComponentKeys(), ", ")))
+	return nil, newWithSentinel(nil, fmt.Sprintf("unknown sentinel component %q (use one of: %s)", name, strings.Join(SentinelComponentKeys(), ", ")))
 }
 
 func findSentinelPortTarget(name string) (*sentinelPortTarget, error) {
@@ -190,7 +190,7 @@ func (m *SentinelManager) newSentinelLogsCmd() *cobra.Command {
 		Use:       "logs [component]",
 		Short:     "View logs for a mcp-sentinel component",
 		Args:      cobra.ExactArgs(1),
-		ValidArgs: sentinelComponentKeys(),
+		ValidArgs: SentinelComponentKeys(),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return m.ViewSentinelLogs(args[0], follow, previous, tail, since)
 		},
