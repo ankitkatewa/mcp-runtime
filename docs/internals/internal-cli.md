@@ -1,8 +1,10 @@
 # CLI Internals
 
 Package `internal/cli` implements the command behavior behind the
-`mcp-runtime` binary. It is intentionally internal so the CLI can evolve without
-becoming a public Go API.
+`mcp-runtime` binary. The top-level Cobra command folders live under
+`internal/cmd`; those packages route to this package while command behavior is
+split out incrementally. Both layers are intentionally internal so the CLI can
+evolve without becoming a public Go API.
 
 `go doc` is still useful for exported constructors and manager types:
 
@@ -166,14 +168,15 @@ Tests: `status_test.go`.
 
 1. Add the command implementation in the closest existing file or a new focused
    file under `internal/cli`.
-2. Wire it from `cmd/mcp-runtime/main.go`.
-3. Add tests with mocked runners or fake dependencies.
-4. Build the CLI and inspect `--help`.
-5. Update golden snapshots if help/output changes intentionally.
-6. Update user docs when behavior is user-facing.
+2. Add or update the thin routing package under `internal/cmd/<command>`.
+3. Register the top-level command from `internal/cmd/commands.go`.
+4. Add tests with mocked runners or fake dependencies.
+5. Build the CLI and inspect `--help`.
+6. Update golden snapshots if help/output changes intentionally.
+7. Update user docs when behavior is user-facing.
 
 Run:
 
 ```bash
-go test ./internal/cli/... ./cmd/mcp-runtime ./test/golden/... -count=1
+go test ./internal/cmd/... ./internal/cli/... ./cmd/mcp-runtime ./test/golden/... -count=1
 ```

@@ -9,7 +9,7 @@ touches shared contracts.
 | Surface | Tests | Use when |
 |---|---|---|
 | API types | `go test ./api/v1alpha1/... -count=1` | CRD structs, validation, deepcopy, scheme registration |
-| CLI | `go test ./internal/cli/... -count=1` | command behavior, setup planning, registry helpers, doctor checks |
+| CLI | `go test ./internal/cmd/... ./internal/cli/... -count=1` | command routing, command behavior, setup planning, registry helpers, doctor checks |
 | Operator | `go test ./internal/operator/... -race -count=1` | reconciliation defaults, owned resources, status, registry/image behavior |
 | Metadata | `go test ./pkg/metadata/... -count=1` | `.mcp` loading, host resolution, manifest generation |
 | Sentinel services | `go test -race -count=1 ./...` in each service module | API, UI, ingest, processor, proxy service logic |
@@ -78,7 +78,7 @@ Security workflows add gosec and Trivy checks.
 
 | Change | Minimum local check |
 |---|---|
-| Cobra help or flags | `go test ./internal/cli/... ./test/golden/... -count=1` |
+| Cobra help or flags | `go test ./internal/cmd/... ./internal/cli/... ./test/golden/... -count=1` |
 | setup, registry, or cluster doctor | targeted `internal/cli` tests plus a local Kind or k3s smoke when behavior affects pulls |
 | CRD schema | `make -f Makefile.operator generate manifests`, API tests, operator tests |
 | reconciliation | operator tests plus integration or e2e when resource ownership changes |

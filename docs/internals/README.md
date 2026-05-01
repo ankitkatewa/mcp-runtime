@@ -40,8 +40,8 @@ flowchart LR
 
 | Area | Start here | Why it matters |
 |---|---|---|
-| CLI entrypoint | [`cmd-mcp-runtime.md`](cmd-mcp-runtime.md) | Shows how the binary starts, wires Cobra commands, and reports errors. |
-| CLI implementation | [`internal-cli.md`](internal-cli.md) | Covers setup, bootstrap, registry, server, access, status, sentinel, auth, and pipeline commands. |
+| CLI entrypoint | [`cmd-mcp-runtime.md`](cmd-mcp-runtime.md) | Shows how the binary starts, wires foldered Cobra commands, and reports errors. |
+| CLI implementation | [`internal-cli.md`](internal-cli.md) | Covers the `internal/cmd` routing layer plus setup, bootstrap, registry, server, access, status, sentinel, auth, and pipeline behavior. |
 | Kubernetes API types | [`api-types.md`](api-types.md) | Defines the public CRD shapes consumed by users, tests, and the operator. |
 | Generated Go reference | [`go-package-reference.md`](go-package-reference.md) | Captures `go doc` output for the main contributor-facing packages. |
 | Operator | [`cmd-operator.md`](cmd-operator.md) | Explains manager startup and reconciliation from desired state to Kubernetes resources. |
@@ -101,7 +101,8 @@ Governance-related changes usually span `api/v1alpha1/access_types.go`, `pkg/acc
 
 ```mermaid
 flowchart TB
-    Cmd[cmd/mcp-runtime] --> InternalCLI[internal/cli]
+    Cmd[cmd/mcp-runtime] --> InternalCmd[internal/cmd]
+    InternalCmd --> InternalCLI[internal/cli]
     InternalCLI --> Metadata[pkg/metadata]
     InternalCLI --> Manifest[pkg/manifest]
     InternalCLI --> K8sClient[pkg/k8sclient]
@@ -117,7 +118,7 @@ flowchart TB
     Metadata --> API
 ```
 
-Keep shared behavior in `pkg/` only when multiple binaries or services need it. CLI-only behavior belongs in `internal/cli`; reconciliation behavior belongs in `internal/operator`; HTTP service glue belongs near the service that owns the endpoint.
+Keep shared behavior in `pkg/` only when multiple binaries or services need it. CLI top-level command routing belongs in `internal/cmd`; CLI-only behavior belongs in `internal/cli`; reconciliation behavior belongs in `internal/operator`; HTTP service glue belongs near the service that owns the endpoint.
 
 ## Learning path
 
@@ -131,7 +132,7 @@ Keep shared behavior in `pkg/` only when multiple binaries or services need it. 
 
 ## Refreshing Package Reference
 
-These pages are contributor guides. The raw Go package reference is generated
+These pages are contributor guides. The Go package reference is generated
 into [Go Package Reference](go-package-reference.md). Refresh it from the current
 checkout with:
 
@@ -147,7 +148,7 @@ workflows.
 
 | Change | Read first | Verify with |
 |---|---|---|
-| Add or change a CLI flag | `internal/cli`, `cmd/mcp-runtime`, golden CLI tests | `go test ./internal/cli/... ./test/golden/... -count=1` |
+| Add or change a CLI flag | `internal/cmd`, `internal/cli`, `cmd/mcp-runtime`, golden CLI tests | `go test ./internal/cmd/... ./internal/cli/... ./test/golden/... -count=1` |
 | Change a CRD field | `api/v1alpha1`, CRD YAML, operator reconciliation, docs/API reference | `go test ./api/v1alpha1/... ./internal/operator/... -count=1` |
 | Change generated manifests | `pkg/metadata`, `pkg/manifest`, `config/`, examples | targeted package tests plus manifest diff review |
 | Change reconciliation behavior | `internal/operator`, API types, k8s helpers | `go test ./internal/operator/... -race -count=1` |

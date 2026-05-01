@@ -8,7 +8,7 @@ If instructions conflict, prefer **this repo** (`README`, CRDs, `v1alpha1` types
 
 | Area | Path | Notes |
 |------|------|--------|
-| User-facing CLI | `cmd/mcp-runtime/`, `internal/cli/` | `setup`, `status`, `registry`, `server`, `access`, … |
+| User-facing CLI | `cmd/mcp-runtime/`, `internal/cmd/`, `internal/cli/` | Entrypoint, foldered Cobra command routing, and command behavior for `setup`, `status`, `registry`, `server`, `access`, … |
 | Operator (controller) | `cmd/operator/`, `internal/operator/` | `MCPServer` reconciliation, ingress, gateway wiring |
 | API & CRD types | `api/v1alpha1/` | Source of truth for object shapes; CRD YAML in `config/crd/bases/` |
 | Access control (shared) | `pkg/access/` | Grants, sessions, policy pieces used by API and gateway |
@@ -42,7 +42,7 @@ Optional but used in CI: `staticcheck ./...` (install: `go install honnef.co/go/
 
 **Targeted tests** (prefer these while iterating; full `./...` can be slow):
 
-- `go test ./internal/operator/... ./internal/cli/... -race -count=1`
+- `go test ./internal/operator/... ./internal/cmd/... ./internal/cli/... -race -count=1`
 - `go test ./test/golden/... -count=1` (CLI help snapshots; update `test/golden/cli/testdata/*.golden` when you change Cobra help text on purpose)
 - `go test ./test/integration/...` (needs `KUBEBUILDER_ASSETS`; see `Makefile.operator` and CI for envtest setup)
 - `services/api` and `services/ui`: `go test -race -count=1 ./...` inside each directory (CI runs these explicitly)
