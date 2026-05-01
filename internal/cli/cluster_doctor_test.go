@@ -222,29 +222,51 @@ func TestCheckTraefikIngressClass(t *testing.T) {
 }
 
 func TestCheckTraefikWebEntrypoint(t *testing.T) {
-	t.Run("ok when service exposes 8000", func(t *testing.T) {
+	t.Run("ok when service exposes named web entrypoint", func(t *testing.T) {
 		mock := &MockExecutor{
 			CommandFunc: func(spec ExecSpec) *MockCommand {
 				return &MockCommand{OutputData: []byte("web:8000:32080\nwebsecure:8443:32443\n")}
 			},
 		}
 		kubectl := &KubectlClient{exec: mock, validators: nil}
-		check := checkTraefikWebEntrypoint(kubectl)
+		check := checkTraefikWebEntrypoint(kubectl, DistroGeneric)
 		if !check.OK {
 			t.Fatalf("expected OK, got detail=%q", check.Detail)
 		}
 	})
 
-	t.Run("fails when service does not expose 8000", func(t *testing.T) {
+	t.Run("ok with k3s bundled traefik service", func(t *testing.T) {
 		mock := &MockExecutor{
 			CommandFunc: func(spec ExecSpec) *MockCommand {
-				return &MockCommand{OutputData: []byte("web:80:32080\n")}
+				switch {
+				case contains(spec.Args, "kube-system"):
+					return &MockCommand{OutputData: []byte("web:80:0\nwebsecure:443:0\n")}
+				case contains(spec.Args, "traefik"):
+					return &MockCommand{OutputErr: errors.New("not found")}
+				}
+				return &MockCommand{}
 			},
 		}
 		kubectl := &KubectlClient{exec: mock, validators: nil}
-		check := checkTraefikWebEntrypoint(kubectl)
+		check := checkTraefikWebEntrypoint(kubectl, DistroK3s)
+		if !check.OK {
+			t.Fatalf("expected OK for k3s bundled Traefik, got detail=%q", check.Detail)
+		}
+		if !strings.Contains(check.Detail, "k3s bundled Traefik") {
+			t.Fatalf("detail should mention k3s bundled Traefik, got %q", check.Detail)
+		}
+	})
+
+	t.Run("fails when service does not expose web entrypoint", func(t *testing.T) {
+		mock := &MockExecutor{
+			CommandFunc: func(spec ExecSpec) *MockCommand {
+				return &MockCommand{OutputData: []byte("admin:9000:32090\n")}
+			},
+		}
+		kubectl := &KubectlClient{exec: mock, validators: nil}
+		check := checkTraefikWebEntrypoint(kubectl, DistroGeneric)
 		if check.OK {
-			t.Fatal("expected failure when port 8000 is not exposed")
+			t.Fatal("expected failure when web entrypoint is not exposed")
 		}
 	})
 }
@@ -572,12 +594,136 @@ func TestRunDoctorAggregates(t *testing.T) {
 	}
 }
 
+func TestRunDoctorWithProgressReportsEachCheck(t *testing.T) {
+	mock := &MockExecutor{
+		CommandFunc: func(spec ExecSpec) *MockCommand {
+			switch {
+			case contains(spec.Args, "jsonpath={.items[*].status.nodeInfo.kubeletVersion}"):
+				return &MockCommand{OutputData: []byte("v1.34.6+k3s1")}
+			case contains(spec.Args, "namespace mcp-servers"):
+				return &MockCommand{OutputData: []byte("mcp-servers")}
+			case contains(spec.Args, "crd mcpservers.mcpruntime.org"):
+				return &MockCommand{OutputData: []byte("mcpservers.mcpruntime.org")}
+			case contains(spec.Args, "mcp-runtime-operator-controller-manager"):
+				return &MockCommand{OutputData: []byte("1/1")}
+			case contains(spec.Args, "ingressclass traefik"):
+				return &MockCommand{OutputData: []byte("traefik")}
+			case contains(spec.Args, "svc -n traefik traefik"):
+				return &MockCommand{OutputData: []byte("web:8000:32080\n")}
+			case contains(spec.Args, "jsonpath={.spec.ports[0].nodePort}"):
+				return &MockCommand{OutputData: []byte("32000")}
+			case contains(spec.Args, "curl"):
+				return &MockCommand{OutputData: []byte("HTTP/1.1 503 Service Unavailable\n")}
+			}
+			return &MockCommand{}
+		},
+	}
+	kubectl := &KubectlClient{exec: mock, validators: nil}
+	var events []string
+	report := RunDoctorWithProgress(kubectl, func(event DoctorCheckProgressEvent) func(DoctorCheck) {
+		if event.Index <= 0 || event.Total <= 0 {
+			t.Fatalf("progress event has invalid position: %+v", event)
+		}
+		if event.Detail == "" {
+			t.Fatalf("progress event for %q should describe what the check is doing", event.Name)
+		}
+		events = append(events, "start:"+event.Name)
+		return func(check DoctorCheck) {
+			events = append(events, "finish:"+check.Name)
+		}
+	})
+
+	if len(report.Checks) == 0 {
+		t.Fatal("expected checks")
+	}
+	if len(events) != len(report.Checks)*2 {
+		t.Fatalf("got %d progress events for %d checks", len(events), len(report.Checks))
+	}
+	for i, check := range report.Checks {
+		start := events[i*2]
+		finish := events[i*2+1]
+		if !strings.HasPrefix(start, "start:") {
+			t.Fatalf("event %d = %q, want start event", i*2, start)
+		}
+		if finish != "finish:"+check.Name {
+			t.Fatalf("finish event for check %d = %q, want %q", i, finish, "finish:"+check.Name)
+		}
+	}
+}
+
+func TestDoctorCurlProbesPassPathValidator(t *testing.T) {
+	validators := []ExecValidator{NoControlChars(), PathUnder("/workspace")}
+
+	t.Run("ingress route probe", func(t *testing.T) {
+		mock := &MockExecutor{
+			CommandFunc: func(spec ExecSpec) *MockCommand {
+				switch {
+				case contains(spec.Args, "jsonpath={.items[0].metadata.name}"):
+					return &MockCommand{OutputData: []byte("demo")}
+				case contains(spec.Args, "jsonpath={.spec.rules[0].host}"):
+					return &MockCommand{}
+				case contains(spec.Args, "jsonpath={.spec.rules[0].http.paths[0].path}"):
+					return &MockCommand{OutputData: []byte("/demo/mcp")}
+				case contains(spec.Args, "svc"):
+					return &MockCommand{OutputData: []byte("web:8000:32080\n")}
+				case contains(spec.Args, "curl"):
+					if contains(spec.Args, "/dev/null") {
+						t.Fatal("doctor curl helper should not pass /dev/null through kubectl validators")
+					}
+					return &MockCommand{OutputData: []byte("200")}
+				default:
+					return &MockCommand{}
+				}
+			},
+		}
+		kubectl := &KubectlClient{exec: mock, validators: validators}
+		check := checkIngressRouteProbe(kubectl, "mcp-servers", DistroGeneric)
+		if !check.OK {
+			t.Fatalf("expected OK, got detail=%q", check.Detail)
+		}
+	})
+
+	t.Run("sentinel API auth probe", func(t *testing.T) {
+		mock := &MockExecutor{
+			CommandFunc: func(spec ExecSpec) *MockCommand {
+				switch {
+				case contains(spec.Args, "namespace"):
+					return &MockCommand{OutputData: []byte(doctorSentinelNamespace)}
+				case contains(spec.Args, "jsonpath={.data.UI_API_KEY}"):
+					return &MockCommand{OutputData: []byte("dGVzdA==")}
+				case contains(spec.Args, "curl"):
+					if contains(spec.Args, "/dev/null") {
+						t.Fatal("doctor curl helper should not pass /dev/null through kubectl validators")
+					}
+					return &MockCommand{OutputData: []byte("200")}
+				default:
+					return &MockCommand{}
+				}
+			},
+		}
+		kubectl := &KubectlClient{exec: mock, validators: validators}
+		check := checkSentinelAPIAuthProbe(kubectl)
+		if !check.OK {
+			t.Fatalf("expected OK, got detail=%q", check.Detail)
+		}
+	})
+}
+
 func TestRemediationHintPerDistro(t *testing.T) {
 	for _, d := range []Distribution{DistroK3s, DistroKind, DistroMinikube, DistroDockerDesktop, DistroGeneric} {
 		hint := remediationHint(d)
 		if hint == "" {
 			t.Errorf("no remediation hint for %q", d)
 		}
+	}
+}
+
+func TestReportHasRegistryOrPullFailure(t *testing.T) {
+	if reportHasRegistryOrPullFailure(DoctorReport{Checks: []DoctorCheck{{Name: "sentinel secrets", OK: false}}}) {
+		t.Fatal("sentinel-only failures should not print registry remediation")
+	}
+	if !reportHasRegistryOrPullFailure(DoctorReport{Checks: []DoctorCheck{{Name: "registry HTTP pull mismatch", OK: false}}}) {
+		t.Fatal("registry pull failures should print registry remediation")
 	}
 }
 
@@ -641,12 +787,34 @@ func TestCheckTraefikDeploymentReady(t *testing.T) {
 				},
 			}
 			kubectl := &KubectlClient{exec: mock, validators: nil}
-			check := checkTraefikDeploymentReady(kubectl)
+			check := checkTraefikDeploymentReady(kubectl, DistroGeneric)
 			if check.OK != tc.wantOK {
 				t.Fatalf("OK=%v want %v; detail=%q", check.OK, tc.wantOK, check.Detail)
 			}
 		})
 	}
+
+	t.Run("ok with k3s bundled traefik deployment", func(t *testing.T) {
+		mock := &MockExecutor{
+			CommandFunc: func(spec ExecSpec) *MockCommand {
+				switch {
+				case contains(spec.Args, "kube-system"):
+					return &MockCommand{OutputData: []byte("1/1")}
+				case contains(spec.Args, "traefik"):
+					return &MockCommand{OutputErr: errors.New("not found")}
+				}
+				return &MockCommand{}
+			},
+		}
+		kubectl := &KubectlClient{exec: mock, validators: nil}
+		check := checkTraefikDeploymentReady(kubectl, DistroK3s)
+		if !check.OK {
+			t.Fatalf("expected OK for k3s bundled Traefik, got detail=%q", check.Detail)
+		}
+		if !strings.Contains(check.Detail, "k3s bundled Traefik") {
+			t.Fatalf("detail should mention k3s bundled Traefik, got %q", check.Detail)
+		}
+	})
 }
 
 func TestCheckTraefikServiceExposure(t *testing.T) {
@@ -697,7 +865,7 @@ func TestCheckTraefikServiceExposure(t *testing.T) {
 				},
 			}
 			kubectl := &KubectlClient{exec: mock, validators: nil}
-			check := checkTraefikServiceExposure(kubectl)
+			check := checkTraefikServiceExposure(kubectl, DistroGeneric)
 			if check.OK != tc.wantOK {
 				t.Fatalf("OK=%v want %v; detail=%q", check.OK, tc.wantOK, check.Detail)
 			}
@@ -706,6 +874,28 @@ func TestCheckTraefikServiceExposure(t *testing.T) {
 			}
 		})
 	}
+
+	t.Run("ok with k3s bundled traefik service", func(t *testing.T) {
+		mock := &MockExecutor{
+			CommandFunc: func(spec ExecSpec) *MockCommand {
+				switch {
+				case contains(spec.Args, "kube-system"):
+					return &MockCommand{OutputData: []byte("LoadBalancer|10.1.2.3||web:80:0,websecure:443:0,")}
+				case contains(spec.Args, "traefik"):
+					return &MockCommand{OutputErr: errors.New("not found")}
+				}
+				return &MockCommand{}
+			},
+		}
+		kubectl := &KubectlClient{exec: mock, validators: nil}
+		check := checkTraefikServiceExposure(kubectl, DistroK3s)
+		if !check.OK {
+			t.Fatalf("expected OK for k3s bundled Traefik, got detail=%q", check.Detail)
+		}
+		if !strings.Contains(check.Detail, "k3s bundled Traefik") {
+			t.Fatalf("detail should mention k3s bundled Traefik, got %q", check.Detail)
+		}
+	})
 }
 
 func TestCheckOperatorRecentReconcileErrors(t *testing.T) {
@@ -720,6 +910,7 @@ func TestCheckOperatorRecentReconcileErrors(t *testing.T) {
 		{name: "failed to reconcile pattern", logs: "msg=\"failed to reconcile\" server=foo\n", wantOK: false},
 		{name: "error syncing pattern", logs: "level=error error syncing mcpserver/foo\n", wantOK: false},
 		{name: "case-insensitive match", logs: "FAILED TO RECONCILE\n", wantOK: false},
+		{name: "ignores doctor smoke transient errors", logs: "ERROR Reconciler error mcpserver=doctor-smoke-123\n", wantOK: true},
 		{name: "no logs, OK", logs: "", wantOK: true},
 		{name: "kubectl error surfaces", outErr: errors.New("no such deploy"), wantOK: false},
 	}
@@ -737,6 +928,76 @@ func TestCheckOperatorRecentReconcileErrors(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestCheckMCPServerReconcileSmoke(t *testing.T) {
+	t.Run("waits for deployment rollout readiness", func(t *testing.T) {
+		sawRollout := false
+		mock := &MockExecutor{
+			CommandFunc: func(spec ExecSpec) *MockCommand {
+				switch {
+				case contains(spec.Args, "apply"):
+					return &MockCommand{}
+				case contains(spec.Args, "rollout"):
+					sawRollout = true
+					if !contains(spec.Args, "--timeout=2m30s") {
+						t.Fatalf("rollout status args %v missing timeout", spec.Args)
+					}
+					return &MockCommand{}
+				case contains(spec.Args, "get"):
+					return &MockCommand{OutputData: []byte("doctor-smoke")}
+				case contains(spec.Args, "delete"):
+					return &MockCommand{}
+				}
+				return &MockCommand{OutputErr: fmt.Errorf("unexpected command: %v", spec.Args)}
+			},
+		}
+		kubectl := &KubectlClient{exec: mock, validators: nil}
+
+		check := checkMCPServerReconcileSmoke(kubectl, "mcp-servers")
+		if !check.OK {
+			t.Fatalf("expected OK, got detail=%q remedy=%q", check.Detail, check.Remedy)
+		}
+		if !sawRollout {
+			t.Fatal("expected smoke check to wait for deployment rollout readiness")
+		}
+		if !strings.Contains(check.Detail, "ready deployment/service/ingress") {
+			t.Fatalf("detail should mention ready deployment resources, got %q", check.Detail)
+		}
+	})
+
+	t.Run("fails when deployment rollout does not become ready", func(t *testing.T) {
+		mock := &MockExecutor{
+			CommandFunc: func(spec ExecSpec) *MockCommand {
+				switch {
+				case contains(spec.Args, "apply"):
+					return &MockCommand{}
+				case contains(spec.Args, "rollout"):
+					return &MockCommand{
+						OutputData: []byte("deployment \"doctor-smoke\" exceeded its progress deadline"),
+						OutputErr:  errors.New("rollout timed out"),
+					}
+				case contains(spec.Args, "get"):
+					return &MockCommand{OutputData: []byte("doctor-smoke")}
+				case contains(spec.Args, "delete"):
+					return &MockCommand{}
+				}
+				return &MockCommand{OutputErr: fmt.Errorf("unexpected command: %v", spec.Args)}
+			},
+		}
+		kubectl := &KubectlClient{exec: mock, validators: nil}
+
+		check := checkMCPServerReconcileSmoke(kubectl, "mcp-servers")
+		if check.OK {
+			t.Fatalf("expected failure when rollout fails; detail=%q", check.Detail)
+		}
+		if !strings.Contains(check.Detail, "deployment did not become ready") {
+			t.Fatalf("detail should describe rollout readiness failure, got %q", check.Detail)
+		}
+		if !strings.Contains(check.Detail, "exceeded its progress deadline") {
+			t.Fatalf("detail should include rollout output, got %q", check.Detail)
+		}
+	})
 }
 
 func TestCheckNodeCapacity(t *testing.T) {
