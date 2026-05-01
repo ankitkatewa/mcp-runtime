@@ -329,9 +329,11 @@ curl -i -H "content-type: application/json" \
      -d '{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"add","arguments":{"a":2,"b":3}}}' $BASE
 ```
 
-If a just-created `MCPAgentSession` returns `session_not_found`, first confirm
-`server policy inspect` shows the session, then allow a few seconds for the
-`mcp-gateway` sidecar to reload its mounted policy file.
+If you just applied `MCPAccessGrant` or `MCPAgentSession` resources, remember
+that `server policy inspect` only confirms the rendered policy. The proxy
+sidecar reloads its local policy file on a short polling loop, so allow a few
+seconds before concluding a fresh session-backed request failed with
+`session_not_found`.
 
 **Bulk (Python)** — fires many `tools/call` events for ingest testing:
 
