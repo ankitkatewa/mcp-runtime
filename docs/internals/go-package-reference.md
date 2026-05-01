@@ -14,7 +14,7 @@ python3 docs/scripts/generate_go_package_reference.py
 - [API types](#api-types) `mcp-runtime/api/v1alpha1`
 - [Metadata helpers](#metadata-helpers) `mcp-runtime/pkg/metadata`
 - [Operator internals](#operator-internals) `mcp-runtime/internal/operator`
-- [CLI command routing](#cli-command-routing) `mcp-runtime/internal/cmd`
+- [CLI command routing](#cli-command-routing) `mcp-runtime/internal/cli/root`
 - [CLI internals](#cli-internals) `mcp-runtime/internal/cli`
 - [CLI binary](#cli-binary) `mcp-runtime/cmd/mcp-runtime`
 - [Operator binary](#operator-binary) `mcp-runtime/cmd/operator`
@@ -2000,25 +2000,23 @@ type RegistryConfig struct {
 <a id="cli-command-routing"></a>
 ## CLI command routing
 
-Package: `cmd`
-Import path: `mcp-runtime/internal/cmd`
+Package: `root`
+Import path: `mcp-runtime/internal/cli/root`
 
 Source command:
 
 ```bash
-go doc -all ./internal/cmd
+go doc -all ./internal/cli/root
 ```
 
 <a id="cli-command-routing-overview"></a>
 ### Overview
 
-Package cmd provides the foldered command routing layer for the mcp-runtime
+Package root provides the foldered CLI command routing layer for the mcp-runtime
 binary.
 
-Each subpackage owns one top-level Cobra command boundary and currently
-delegates behavior to internal/cli. Keeping this layer separate from the CLI
-implementation lets the binary wire commands through stable folders while the
-larger command implementations can be migrated incrementally.
+Each subpackage owns one top-level Cobra command boundary and delegates behavior
+to the shared internal/cli implementation package.
 
 ### Jump To
 

@@ -15,7 +15,7 @@ PACKAGES = [
     ("API types", ["go", "doc", "-all", "./api/v1alpha1"]),
     ("Metadata helpers", ["go", "doc", "-all", "./pkg/metadata"]),
     ("Operator internals", ["go", "doc", "-all", "./internal/operator"]),
-    ("CLI command routing", ["go", "doc", "-all", "./internal/cmd"]),
+    ("CLI command routing", ["go", "doc", "-all", "./internal/cli/root"]),
     ("CLI internals", ["go", "doc", "-all", "./internal/cli"]),
     ("CLI binary", ["go", "doc", "-cmd", "./cmd/mcp-runtime"]),
     ("Operator binary", ["go", "doc", "-cmd", "./cmd/operator"]),

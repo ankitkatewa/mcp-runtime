@@ -9,7 +9,7 @@ import (
 	"go.uber.org/zap/zapcore"
 
 	"mcp-runtime/internal/cli"
-	runtimecmd "mcp-runtime/internal/cmd"
+	cliroot "mcp-runtime/internal/cli/root"
 )
 
 var (
@@ -55,7 +55,7 @@ func init() {
 }
 
 func initCommands(logger *zap.Logger) {
-	runtimecmd.AddCommands(rootCmd, logger)
+	cliroot.AddCommands(rootCmd, logger)
 }
 
 // newConsoleLogger returns a human-friendly console logger with timestamps and caller info.

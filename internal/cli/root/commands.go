@@ -1,19 +1,19 @@
-package cmd
+package root
 
 import (
 	"github.com/spf13/cobra"
 	"go.uber.org/zap"
 
-	"mcp-runtime/internal/cmd/access"
-	"mcp-runtime/internal/cmd/auth"
-	"mcp-runtime/internal/cmd/bootstrap"
-	"mcp-runtime/internal/cmd/cluster"
-	"mcp-runtime/internal/cmd/pipeline"
-	"mcp-runtime/internal/cmd/registry"
-	"mcp-runtime/internal/cmd/sentinel"
-	"mcp-runtime/internal/cmd/server"
-	"mcp-runtime/internal/cmd/setup"
-	"mcp-runtime/internal/cmd/status"
+	"mcp-runtime/internal/cli/access"
+	"mcp-runtime/internal/cli/auth"
+	"mcp-runtime/internal/cli/bootstrap"
+	"mcp-runtime/internal/cli/cluster"
+	"mcp-runtime/internal/cli/pipeline"
+	"mcp-runtime/internal/cli/registry"
+	"mcp-runtime/internal/cli/sentinel"
+	"mcp-runtime/internal/cli/server"
+	"mcp-runtime/internal/cli/setup"
+	"mcp-runtime/internal/cli/status"
 )
 
 // AddCommands registers every top-level mcp-runtime command on root.
