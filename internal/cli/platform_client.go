@@ -49,7 +49,7 @@ func newPlatformClient() (*platformClient, error) {
 		return nil, authfile.ErrNotFound
 	}
 	return &platformClient{
-		baseURL:   normalizePlatformAPIBaseURL(base),
+		baseURL:   NormalizePlatformAPIBaseURL(base),
 		token:     tok,
 		http:      &http.Client{Timeout: 2 * time.Minute},
 		apiPrefix: "/api",

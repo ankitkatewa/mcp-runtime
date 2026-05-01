@@ -28,11 +28,6 @@ func (r *Runtime) AccessManager() *AccessManager {
 	return DefaultAccessManager(r.logger)
 }
 
-// AuthManager returns the auth command manager.
-func (r *Runtime) AuthManager() *AuthManager {
-	return NewAuthManager(r.logger)
-}
-
 // ClusterManager returns the cluster command manager.
 func (r *Runtime) ClusterManager() *ClusterManager {
 	return DefaultClusterManager(r.logger)

@@ -2096,7 +2096,6 @@ _No package overview is documented._
 - [`func IsDebugMode() bool`](#cli-internals-func-isdebugmode-bool)
 - [`func NewAccessCmd(logger *zap.Logger) *cobra.Command`](#cli-internals-func-newaccesscmd-logger-zap-logger-cobra-command)
 - [`func NewAccessCmdWithManager(mgr *AccessManager) *cobra.Command`](#cli-internals-func-newaccesscmdwithmanager-mgr-accessmanager-cobra-command)
-- [`func NewAuthCmd(logger *zap.Logger) *cobra.Command`](#cli-internals-func-newauthcmd-logger-zap-logger-cobra-command)
 - [`func NewBootstrapCmd(logger *zap.Logger) *cobra.Command`](#cli-internals-func-newbootstrapcmd-logger-zap-logger-cobra-command)
 - [`func NewBuildImageCmd(logger *zap.Logger) *cobra.Command`](#cli-internals-func-newbuildimagecmd-logger-zap-logger-cobra-command)
 - [`func NewClusterCertCmdWithManager(mgr *ClusterManager) *cobra.Command`](#cli-internals-func-newclustercertcmdwithmanager-mgr-clustermanager-cobra-command)
@@ -2113,6 +2112,7 @@ _No package overview is documented._
 - [`func NewServerCmdWithManager(mgr *ServerManager) *cobra.Command`](#cli-internals-func-newservercmdwithmanager-mgr-servermanager-cobra-command)
 - [`func NewSetupCmd(logger *zap.Logger) *cobra.Command`](#cli-internals-func-newsetupcmd-logger-zap-logger-cobra-command)
 - [`func NewStatusCmd(logger *zap.Logger) *cobra.Command`](#cli-internals-func-newstatuscmd-logger-zap-logger-cobra-command)
+- [`func NormalizePlatformAPIBaseURL(raw string) string`](#cli-internals-func-normalizeplatformapibaseurl-raw-string-string)
 - [`func PrintDoctorReport(r DoctorReport)`](#cli-internals-func-printdoctorreport-r-doctorreport)
 - [`func Red(msg string) string`](#cli-internals-func-red-msg-string-string)
 - [`func RunBootstrapPreflight(kubectl KubectlRunner) error`](#cli-internals-func-runbootstrappreflight-kubectl-kubectlrunner-error)
@@ -2142,12 +2142,6 @@ _No package overview is documented._
 - [`func (m *AccessManager) ListAccessResources(resource, namespace string, allNamespaces bool) error`](#cli-internals-func-m-accessmanager-listaccessresources-resource-namespace-string-allnamespaces-bool-error)
 - [`func (m *AccessManager) ToggleAccessResource(resource, name, namespace string, value bool) error`](#cli-internals-func-m-accessmanager-toggleaccessresource-resource-name-namespace-string-value-bool-error)
 - [`type AnalyticsImageSet struct`](#cli-internals-type-analyticsimageset-struct)
-- [`type AuthManager struct`](#cli-internals-type-authmanager-struct)
-- [`func NewAuthManager(logger *zap.Logger) *AuthManager`](#cli-internals-func-newauthmanager-logger-zap-logger-authmanager)
-- [`func (m *AuthManager) NewLoginCmd() *cobra.Command`](#cli-internals-func-m-authmanager-newlogincmd-cobra-command)
-- [`func (m *AuthManager) NewLogoutCmd() *cobra.Command`](#cli-internals-func-m-authmanager-newlogoutcmd-cobra-command)
-- [`func (m *AuthManager) NewStatusCmd() *cobra.Command`](#cli-internals-func-m-authmanager-newstatuscmd-cobra-command)
-- [`func (m *AuthManager) RunAuthLogin(cmd *cobra.Command, f LoginFlags) error`](#cli-internals-func-m-authmanager-runauthlogin-cmd-cobra-command-f-loginflags-error)
 - [`type CLIConfig struct`](#cli-internals-type-cliconfig-struct)
 - [`func LoadCLIConfig() *CLIConfig`](#cli-internals-func-loadcliconfig-cliconfig)
 - [`type CertManager struct`](#cli-internals-type-certmanager-struct)
@@ -2195,7 +2189,6 @@ _No package overview is documented._
 - [`func (c *KubectlClient) RunWithOutput(args []string, stdout, stderr io.Writer) error`](#cli-internals-func-c-kubectlclient-runwithoutput-args-string-stdout-stderr-io-writer-error)
 - [`type KubectlRunner interface`](#cli-internals-type-kubectlrunner-interface)
 - [`func DefaultKubectlRunner() KubectlRunner`](#cli-internals-func-defaultkubectlrunner-kubectlrunner)
-- [`type LoginFlags struct`](#cli-internals-type-loginflags-struct)
 - [`type MockCommand struct`](#cli-internals-type-mockcommand-struct)
 - [`func (m *MockCommand) CombinedOutput() ([]byte, error)`](#cli-internals-func-m-mockcommand-combinedoutput-byte-error)
 - [`func (m *MockCommand) Output() ([]byte, error)`](#cli-internals-func-m-mockcommand-output-byte-error)
@@ -2242,7 +2235,6 @@ _No package overview is documented._
 - [`type Runtime struct`](#cli-internals-type-runtime-struct)
 - [`func NewRuntime(logger *zap.Logger) *Runtime`](#cli-internals-func-newruntime-logger-zap-logger-runtime)
 - [`func (r *Runtime) AccessManager() *AccessManager`](#cli-internals-func-r-runtime-accessmanager-accessmanager)
-- [`func (r *Runtime) AuthManager() *AuthManager`](#cli-internals-func-r-runtime-authmanager-authmanager)
 - [`func (r *Runtime) ClusterManager() *ClusterManager`](#cli-internals-func-r-runtime-clustermanager-clustermanager)
 - [`func (r *Runtime) KubectlRunner() KubectlRunner`](#cli-internals-func-r-runtime-kubectlrunner-kubectlrunner)
 - [`func (r *Runtime) Logger() *zap.Logger`](#cli-internals-func-r-runtime-logger-zap-logger)
@@ -2711,14 +2703,6 @@ func NewAccessCmd(logger *zap.Logger) *cobra.Command
 func NewAccessCmdWithManager(mgr *AccessManager) *cobra.Command
 ```
 
-<a id="cli-internals-func-newauthcmd-logger-zap-logger-cobra-command"></a>
-```text
-func NewAuthCmd(logger *zap.Logger) *cobra.Command
-    NewAuthCmd is the `auth` command (login, logout, status) for platform
-    credentials.
-
-```
-
 <a id="cli-internals-func-newbootstrapcmd-logger-zap-logger-cobra-command"></a>
 ```text
 func NewBootstrapCmd(logger *zap.Logger) *cobra.Command
@@ -2834,6 +2818,14 @@ func NewSetupCmd(logger *zap.Logger) *cobra.Command
 ```text
 func NewStatusCmd(logger *zap.Logger) *cobra.Command
     NewStatusCmd returns the status subcommand for platform health checks.
+
+```
+
+<a id="cli-internals-func-normalizeplatformapibaseurl-raw-string-string"></a>
+```text
+func NormalizePlatformAPIBaseURL(raw string) string
+    NormalizePlatformAPIBaseURL trims whitespace, trailing slashes, and an
+    optional trailing /api suffix from a platform base URL.
 
 ```
 
@@ -3047,47 +3039,6 @@ type AnalyticsImageSet struct {
 	Promtail      string
 	Grafana       string
 }
-
-```
-
-<a id="cli-internals-type-authmanager-struct"></a>
-```text
-type AuthManager struct {
-	// Has unexported fields.
-}
-
-```
-
-<a id="cli-internals-func-newauthmanager-logger-zap-logger-authmanager"></a>
-```text
-func NewAuthManager(logger *zap.Logger) *AuthManager
-
-```
-
-<a id="cli-internals-func-m-authmanager-newlogincmd-cobra-command"></a>
-```text
-func (m *AuthManager) NewLoginCmd() *cobra.Command
-    NewLoginCmd exposes the login subcommand builder for folder packages.
-
-```
-
-<a id="cli-internals-func-m-authmanager-newlogoutcmd-cobra-command"></a>
-```text
-func (m *AuthManager) NewLogoutCmd() *cobra.Command
-    NewLogoutCmd exposes the logout subcommand builder for folder packages.
-
-```
-
-<a id="cli-internals-func-m-authmanager-newstatuscmd-cobra-command"></a>
-```text
-func (m *AuthManager) NewStatusCmd() *cobra.Command
-    NewStatusCmd exposes the status subcommand builder for folder packages.
-
-```
-
-<a id="cli-internals-func-m-authmanager-runauthlogin-cmd-cobra-command-f-loginflags-error"></a>
-```text
-func (m *AuthManager) RunAuthLogin(cmd *cobra.Command, f LoginFlags) error
 
 ```
 
@@ -3504,14 +3455,6 @@ func DefaultKubectlRunner() KubectlRunner
 
 ```
 
-<a id="cli-internals-type-loginflags-struct"></a>
-```text
-type LoginFlags struct {
-	// Has unexported fields.
-}
-
-```
-
 <a id="cli-internals-type-mockcommand-struct"></a>
 ```text
 type MockCommand struct {
@@ -3864,13 +3807,6 @@ func NewRuntime(logger *zap.Logger) *Runtime
 ```text
 func (r *Runtime) AccessManager() *AccessManager
     AccessManager returns the access command manager.
-
-```
-
-<a id="cli-internals-func-r-runtime-authmanager-authmanager"></a>
-```text
-func (r *Runtime) AuthManager() *AuthManager
-    AuthManager returns the auth command manager.
 
 ```
 
