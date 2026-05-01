@@ -3,14 +3,13 @@ package sentinel
 
 import (
 	"github.com/spf13/cobra"
-	"go.uber.org/zap"
 
 	"mcp-runtime/internal/cli"
 )
 
 // New returns the sentinel command.
-func New(logger *zap.Logger) *cobra.Command {
-	return NewWithManager(cli.DefaultSentinelManager(logger))
+func New(runtime *cli.Runtime) *cobra.Command {
+	return NewWithManager(runtime.SentinelManager())
 }
 
 // NewWithManager returns the sentinel command using the provided manager.

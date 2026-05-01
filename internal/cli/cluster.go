@@ -67,6 +67,16 @@ func NewClusterCmdWithManager(mgr *ClusterManager) *cobra.Command {
 	return cmd
 }
 
+// NewClusterCertCmdWithManager exposes the cert subcommand builder for folder packages.
+func NewClusterCertCmdWithManager(mgr *ClusterManager) *cobra.Command {
+	return mgr.newClusterCertCmd()
+}
+
+// NewClusterDoctorCmdWithManager exposes the doctor subcommand builder for folder packages.
+func NewClusterDoctorCmdWithManager(mgr *ClusterManager) *cobra.Command {
+	return mgr.newClusterDoctorCmd()
+}
+
 func (m *ClusterManager) newClusterInitCmd() *cobra.Command {
 	var kubeconfig string
 	var context string
@@ -443,6 +453,15 @@ func (m *ClusterManager) ConfigureCluster(ingress ingressOptions) error {
 	m.logger.Info("Ingress controller installed successfully", zap.String("ingress", ingress.mode))
 	m.logger.Info("Cluster configuration complete")
 	return nil
+}
+
+// ConfigureClusterWithValues adapts exported flag values into the internal ingress options shape.
+func (m *ClusterManager) ConfigureClusterWithValues(mode, manifest string, force bool) error {
+	return m.ConfigureCluster(ingressOptions{
+		mode:     mode,
+		manifest: manifest,
+		force:    force,
+	})
 }
 
 // ProvisionCluster provisions a new Kubernetes cluster.

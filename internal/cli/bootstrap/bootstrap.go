@@ -5,15 +5,23 @@ import (
 	"fmt"
 
 	"github.com/spf13/cobra"
-	"go.uber.org/zap"
 
 	"mcp-runtime/internal/cli"
 )
 
+type manager struct {
+	kubectl cli.KubectlRunner
+}
+
+func newManager(runtime *cli.Runtime) *manager {
+	return &manager{kubectl: runtime.KubectlRunner()}
+}
+
 // New returns the bootstrap command.
-func New(logger *zap.Logger) *cobra.Command {
+func New(runtime *cli.Runtime) *cobra.Command {
 	var apply bool
 	var provider string
+	mgr := newManager(runtime)
 
 	cmd := &cobra.Command{
 		Use:   "bootstrap",
@@ -26,11 +34,9 @@ Use this to prepare an existing cluster for running 'mcp-runtime setup'.
 Note: bootstrap --apply is automated for k3s only and must be executed on the k3s server node (it expects local manifests under /var/lib/rancher/k3s/server/manifests).`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			cli.Section("MCP Runtime Bootstrap")
-
-			kubectl := cli.DefaultKubectlRunner()
 			chosenProvider := provider
 			if chosenProvider == "" || chosenProvider == "auto" {
-				detectedProvider, err := cli.DetectProvider(kubectl)
+				detectedProvider, err := cli.DetectProvider(mgr.kubectl)
 				if err != nil {
 					return err
 				}
@@ -38,7 +44,7 @@ Note: bootstrap --apply is automated for k3s only and must be executed on the k3
 			}
 			cli.Info(fmt.Sprintf("Provider: %s", chosenProvider))
 
-			if err := cli.RunBootstrapPreflight(kubectl); err != nil {
+			if err := cli.RunBootstrapPreflight(mgr.kubectl); err != nil {
 				return err
 			}
 
@@ -50,7 +56,7 @@ Note: bootstrap --apply is automated for k3s only and must be executed on the k3
 
 			switch chosenProvider {
 			case "k3s":
-				if err := cli.BootstrapApplyK3s(kubectl); err != nil {
+				if err := cli.BootstrapApplyK3s(mgr.kubectl); err != nil {
 					return err
 				}
 			case "rke2", "kubeadm", "generic":

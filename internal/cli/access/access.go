@@ -3,7 +3,6 @@ package access
 
 import (
 	"github.com/spf13/cobra"
-	"go.uber.org/zap"
 
 	"mcp-runtime/internal/cli"
 )
@@ -14,8 +13,8 @@ const (
 )
 
 // New returns the access command.
-func New(logger *zap.Logger) *cobra.Command {
-	return NewWithManager(cli.DefaultAccessManager(logger))
+func New(runtime *cli.Runtime) *cobra.Command {
+	return NewWithManager(runtime.AccessManager())
 }
 
 // NewWithManager returns the access command using the provided manager.

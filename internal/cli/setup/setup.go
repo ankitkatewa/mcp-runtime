@@ -11,8 +11,16 @@ import (
 	"mcp-runtime/internal/cli"
 )
 
+type manager struct {
+	logger *zap.Logger
+}
+
+func newManager(runtime *cli.Runtime) *manager {
+	return &manager{logger: runtime.Logger()}
+}
+
 // New returns the setup command.
-func New(logger *zap.Logger) *cobra.Command {
+func New(runtime *cli.Runtime) *cobra.Command {
 	var registryType string
 	var registryStorageSize string
 	var storageMode string
@@ -32,6 +40,7 @@ func New(logger *zap.Logger) *cobra.Command {
 	var acmeStaging bool
 	var tlsClusterIssuer string
 	var skipCertManagerInstall bool
+	mgr := newManager(runtime)
 
 	cmd := &cobra.Command{
 		Use:   "setup",
@@ -93,7 +102,7 @@ will use to push and pull container images.`,
 				InstallCertManager:     !skipCertManagerInstall,
 			})
 
-			return cli.SetupPlatform(logger, plan)
+			return cli.SetupPlatform(mgr.logger, plan)
 		},
 	}
 

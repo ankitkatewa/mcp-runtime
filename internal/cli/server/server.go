@@ -3,14 +3,13 @@ package server
 
 import (
 	"github.com/spf13/cobra"
-	"go.uber.org/zap"
 
 	"mcp-runtime/internal/cli"
 )
 
 // New returns the server command.
-func New(logger *zap.Logger) *cobra.Command {
-	return NewWithManager(cli.DefaultServerManager(logger))
+func New(runtime *cli.Runtime) *cobra.Command {
+	return NewWithManager(runtime.ServerManager())
 }
 
 // NewWithManager returns the server command using the provided manager.

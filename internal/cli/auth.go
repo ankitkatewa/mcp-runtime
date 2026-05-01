@@ -31,7 +31,7 @@ var authHTTPDoHook func(req *http.Request) (*http.Response, error)
 
 // NewAuthCmd is the `auth` command (login, logout, status) for platform credentials.
 func NewAuthCmd(logger *zap.Logger) *cobra.Command {
-	m := &authManager{logger: logger}
+	m := NewAuthManager(logger)
 	cmd := &cobra.Command{
 		Use:   "auth",
 		Short: "Log in to the platform API and manage saved credentials",
@@ -55,11 +55,11 @@ Optional environment:
 	return cmd
 }
 
-type authManager struct {
+type AuthManager struct {
 	logger *zap.Logger
 }
 
-type loginFlags struct {
+type LoginFlags struct {
 	apiURL         string
 	email          string
 	password       string
@@ -69,13 +69,17 @@ type loginFlags struct {
 	skipVerify     bool
 }
 
-func (m *authManager) newAuthLoginCmd() *cobra.Command {
-	var f loginFlags
+func NewAuthManager(logger *zap.Logger) *AuthManager {
+	return &AuthManager{logger: logger}
+}
+
+func (m *AuthManager) newAuthLoginCmd() *cobra.Command {
+	var f LoginFlags
 	cmd := &cobra.Command{
 		Use:   "login",
 		Short: "Save a platform API token and optional registry host",
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			return m.runAuthLogin(cmd, f)
+			return m.RunAuthLogin(cmd, f)
 		},
 	}
 
@@ -90,7 +94,12 @@ func (m *authManager) newAuthLoginCmd() *cobra.Command {
 	return cmd
 }
 
-func (m *authManager) runAuthLogin(cmd *cobra.Command, f loginFlags) error {
+// NewLoginCmd exposes the login subcommand builder for folder packages.
+func (m *AuthManager) NewLoginCmd() *cobra.Command {
+	return m.newAuthLoginCmd()
+}
+
+func (m *AuthManager) RunAuthLogin(cmd *cobra.Command, f LoginFlags) error {
 	stdout := io.Writer(os.Stdout)
 	stderr := io.Writer(os.Stderr)
 	if cmd != nil {
@@ -229,7 +238,7 @@ func terminalFD(fd uintptr) (int, error) {
 	return int(fd), nil
 }
 
-func (m *authManager) newAuthLogoutCmd() *cobra.Command {
+func (m *AuthManager) newAuthLogoutCmd() *cobra.Command {
 	return &cobra.Command{
 		Use:   "logout",
 		Short: "Delete saved platform credentials on this machine",
@@ -247,7 +256,12 @@ func (m *authManager) newAuthLogoutCmd() *cobra.Command {
 	}
 }
 
-func (m *authManager) newAuthStatusCmd() *cobra.Command {
+// NewLogoutCmd exposes the logout subcommand builder for folder packages.
+func (m *AuthManager) NewLogoutCmd() *cobra.Command {
+	return m.newAuthLogoutCmd()
+}
+
+func (m *AuthManager) newAuthStatusCmd() *cobra.Command {
 	return &cobra.Command{
 		Use:   "status",
 		Short: "Show whether platform API credentials are configured",
@@ -296,6 +310,11 @@ func (m *authManager) newAuthStatusCmd() *cobra.Command {
 			return nil
 		},
 	}
+}
+
+// NewStatusCmd exposes the status subcommand builder for folder packages.
+func (m *AuthManager) NewStatusCmd() *cobra.Command {
+	return m.newAuthStatusCmd()
 }
 
 // fileCredentialsIfRelevant returns saved-file credentials when not using the env override.
