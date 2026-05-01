@@ -303,6 +303,9 @@ func (r *MCPServerReconciler) checkResourceReadiness(ctx context.Context, mcpSer
 	if gatewayEnabled(mcpServer) {
 		gatewayReady = deploymentReady
 	}
+	if !canaryEnabled(mcpServer) {
+		canaryReady = false
+	}
 
 	return resourceReadiness{
 		Deployment: deploymentReady,
@@ -315,12 +318,12 @@ func (r *MCPServerReconciler) checkResourceReadiness(ctx context.Context, mcpSer
 }
 
 func determinePhase(readiness resourceReadiness, mcpServer *mcpv1alpha1.MCPServer) (string, bool) {
-	var allReady bool
+	allReady := readiness.Deployment && readiness.Service && readiness.Ingress
 	if gatewayEnabled(mcpServer) {
-		allReady = readiness.Deployment && readiness.Service && readiness.Ingress && readiness.Gateway && readiness.Policy && readiness.Canary
-	} else {
-		allReady = readiness.Deployment && readiness.Service && readiness.Ingress && readiness.Canary
-
+		allReady = allReady && readiness.Gateway && readiness.Policy
+	}
+	if canaryEnabled(mcpServer) {
+		allReady = allReady && readiness.Canary
 	}
 	if allReady {
 		return "Ready", true

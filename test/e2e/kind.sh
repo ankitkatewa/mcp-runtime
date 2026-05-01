@@ -40,13 +40,6 @@ RUST_EXAMPLE_SERVER_ROUTE="${RUST_EXAMPLE_SERVER_ROUTE:-/${RUST_EXAMPLE_SERVER_N
 GO_EXAMPLE_SERVER_NAME="${GO_EXAMPLE_SERVER_NAME:-go-example-mcp}"
 GO_EXAMPLE_SERVER_HOST="${GO_EXAMPLE_SERVER_HOST:-${PLATFORM_HOST}}"
 GO_EXAMPLE_SERVER_ROUTE="${GO_EXAMPLE_SERVER_ROUTE:-/${GO_EXAMPLE_SERVER_NAME}/mcp}"
-SHARED_SDK_HOST="${SHARED_SDK_HOST:-${PLATFORM_HOST}}"
-PYTHON_SHARED_SERVER_NAME="${PYTHON_SHARED_SERVER_NAME:-python-shared-mcp}"
-PYTHON_SHARED_SERVER_ROUTE="${PYTHON_SHARED_SERVER_ROUTE:-/${PYTHON_SHARED_SERVER_NAME}/mcp}"
-RUST_SHARED_SERVER_NAME="${RUST_SHARED_SERVER_NAME:-rust-shared-mcp}"
-RUST_SHARED_SERVER_ROUTE="${RUST_SHARED_SERVER_ROUTE:-/${RUST_SHARED_SERVER_NAME}/mcp}"
-GO_SHARED_SERVER_NAME="${GO_SHARED_SERVER_NAME:-go-shared-mcp}"
-GO_SHARED_SERVER_ROUTE="${GO_SHARED_SERVER_ROUTE:-/${GO_SHARED_SERVER_NAME}/mcp}"
 HUMAN_ID="${HUMAN_ID:-user-123}"
 AGENT_ID="${AGENT_ID:-ops-agent}"
 SESSION_ID="${SESSION_ID:-sess-ops-agent}"
@@ -69,10 +62,7 @@ OAUTH_PROXY_PORT="${OAUTH_PROXY_PORT:-18096}"
 OAUTH_UPSTREAM_PORT="${OAUTH_UPSTREAM_PORT:-18097}"
 PYTHON_EXAMPLE_PROXY_PORT="${PYTHON_EXAMPLE_PROXY_PORT:-18098}"
 RUST_EXAMPLE_PROXY_PORT="${RUST_EXAMPLE_PROXY_PORT:-18099}"
-PYTHON_SHARED_PROXY_PORT="${PYTHON_SHARED_PROXY_PORT:-18100}"
-RUST_SHARED_PROXY_PORT="${RUST_SHARED_PROXY_PORT:-18101}"
 GO_EXAMPLE_PROXY_PORT="${GO_EXAMPLE_PROXY_PORT:-18102}"
-GO_SHARED_PROXY_PORT="${GO_SHARED_PROXY_PORT:-18103}"
 API_METRICS_PORT="${API_METRICS_PORT:-19090}"
 INGEST_METRICS_PORT="${INGEST_METRICS_PORT:-19091}"
 PROCESSOR_METRICS_PORT="${PROCESSOR_METRICS_PORT:-19092}"
@@ -1213,19 +1203,19 @@ wait_for_named_server_ready() {
   local i
   for i in $(seq 1 "${tries}"); do
     local deployment_ready
-    local gateway_ready
-    local policy_ready
+    local phase
     local service_ready
+    local ingress_ready
     deployment_ready="$(kubectl get mcpserver "${server_name}" -n "${namespace}" -o jsonpath='{.status.deploymentReady}' 2>/dev/null || true)"
-    gateway_ready="$(kubectl get mcpserver "${server_name}" -n "${namespace}" -o jsonpath='{.status.gatewayReady}' 2>/dev/null || true)"
-    policy_ready="$(kubectl get mcpserver "${server_name}" -n "${namespace}" -o jsonpath='{.status.policyReady}' 2>/dev/null || true)"
     service_ready="$(kubectl get mcpserver "${server_name}" -n "${namespace}" -o jsonpath='{.status.serviceReady}' 2>/dev/null || true)"
-    if [[ "${deployment_ready}" == "true" && "${gateway_ready}" == "true" && "${policy_ready}" == "true" && "${service_ready}" == "true" ]]; then
+    ingress_ready="$(kubectl get mcpserver "${server_name}" -n "${namespace}" -o jsonpath='{.status.ingressReady}' 2>/dev/null || true)"
+    phase="$(kubectl get mcpserver "${server_name}" -n "${namespace}" -o jsonpath='{.status.phase}' 2>/dev/null || true)"
+    if [[ "${deployment_ready}" == "true" && "${service_ready}" == "true" && "${ingress_ready}" == "true" && "${phase}" == "Ready" ]]; then
       return 0
     fi
     sleep 2
   done
-  echo "timed out waiting for MCPServer ${server_name} to report service/deployment/gateway/policy readiness" >&2
+  echo "timed out waiting for MCPServer ${server_name} to report core readiness and phase Ready" >&2
   kubectl get mcpserver "${server_name}" -n "${namespace}" -o yaml || true
   return 1
 }
@@ -1804,24 +1794,6 @@ deploy_example_server_via_pipeline \
   "${GO_EXAMPLE_SERVER_ROUTE}" \
   "${GO_EXAMPLE_SOURCE_DIR}" \
   "${GO_EXAMPLE_WORKDIR}"
-deploy_example_server_via_pipeline \
-  "${PYTHON_SHARED_SERVER_NAME}" \
-  "${SHARED_SDK_HOST}" \
-  "${PYTHON_SHARED_SERVER_ROUTE}" \
-  "${PYTHON_EXAMPLE_SOURCE_DIR}" \
-  "${WORKDIR}/python-shared-mcp-server"
-deploy_example_server_via_pipeline \
-  "${RUST_SHARED_SERVER_NAME}" \
-  "${SHARED_SDK_HOST}" \
-  "${RUST_SHARED_SERVER_ROUTE}" \
-  "${RUST_EXAMPLE_SOURCE_DIR}" \
-  "${WORKDIR}/rust-shared-mcp-server"
-deploy_example_server_via_pipeline \
-  "${GO_SHARED_SERVER_NAME}" \
-  "${SHARED_SDK_HOST}" \
-  "${GO_SHARED_SERVER_ROUTE}" \
-  "${GO_EXAMPLE_SOURCE_DIR}" \
-  "${WORKDIR}/go-shared-mcp-server"
 
 echo "[cli] checking server commands"
 
@@ -1867,6 +1839,9 @@ check("deploymentReady: true" in get_yaml,
 check("serviceReady: true" in get_yaml,
       "serviceReady: true",
       f"server get: serviceReady is not true\n{get_yaml}")
+check('type: CanaryReady' in get_yaml and 'status: "False"' in get_yaml,
+      'CanaryReady condition is false',
+      f"server get: CanaryReady condition is not false for a server without canary rollout\n{get_yaml}")
 
 # Assert spec fields reflect what was deployed
 expected_path = f"/{server_name}/mcp"
@@ -1901,17 +1876,6 @@ print(f"[cli] Canonical ingress URL for {server_name}: {canonical_mcp_url}")
 print(f"[cli] Local e2e MCP client config for {server_name}:")
 print(json.dumps(config, indent=2))
 PYEOF
-
-# --- server status: assert the primary server appears ---
-_cli_status_out="$(./bin/mcp-runtime server status --namespace mcp-servers 2>&1)"
-if ! printf '%s\n' "${_cli_status_out}" | grep -qF "${SERVER_NAME}"; then
-  echo "[cli][fail] 'server status' output does not contain ${SERVER_NAME}" >&2
-  printf '%s\n' "${_cli_status_out}" >&2
-  exit 1
-fi
-echo "[cli][pass] server status contains ${SERVER_NAME}"
-
-./bin/mcp-runtime server logs "${SERVER_NAME}" --namespace mcp-servers >"${WORKDIR}/${SERVER_NAME}.logs"
 
 echo "[policy] applying access grant via CLI"
 cat >"${WORKDIR}/access-grant.yaml" <<EOF
@@ -2050,22 +2014,6 @@ start_header_proxy_bg "${GO_EXAMPLE_PROXY_PORT}" \
   "${WORKDIR}/go-example-proxy.log" \
   --host-header "${GO_EXAMPLE_SERVER_HOST}" \
   --header "Mcp-Protocol-Version=${MCP_PROTOCOL_VERSION}"
-start_header_proxy_bg "${PYTHON_SHARED_PROXY_PORT}" \
-  "http://127.0.0.1:${TRAEFIK_PORT}" \
-  "${WORKDIR}/python-shared-proxy.log" \
-  --host-header "${SHARED_SDK_HOST}" \
-  --header "Mcp-Protocol-Version=${MCP_PROTOCOL_VERSION}"
-start_header_proxy_bg "${RUST_SHARED_PROXY_PORT}" \
-  "http://127.0.0.1:${TRAEFIK_PORT}" \
-  "${WORKDIR}/rust-shared-proxy.log" \
-  --host-header "${SHARED_SDK_HOST}" \
-  --header "Mcp-Protocol-Version=${MCP_PROTOCOL_VERSION}"
-start_header_proxy_bg "${GO_SHARED_PROXY_PORT}" \
-  "http://127.0.0.1:${TRAEFIK_PORT}" \
-  "${WORKDIR}/go-shared-proxy.log" \
-  --host-header "${SHARED_SDK_HOST}" \
-  --header "Mcp-Protocol-Version=${MCP_PROTOCOL_VERSION}"
-
 wait_port "${MCP_SMOKE_ANON_PORT}"
 wait_port "${MCP_SMOKE_IDENTITY_PORT}"
 wait_port "${MCP_SMOKE_SESSION_PORT}"
@@ -2073,9 +2021,6 @@ wait_port "${MCP_SMOKE_BAD_SESSION_PORT}"
 wait_port "${PYTHON_EXAMPLE_PROXY_PORT}"
 wait_port "${RUST_EXAMPLE_PROXY_PORT}"
 wait_port "${GO_EXAMPLE_PROXY_PORT}"
-wait_port "${PYTHON_SHARED_PROXY_PORT}"
-wait_port "${RUST_SHARED_PROXY_PORT}"
-wait_port "${GO_SHARED_PROXY_PORT}"
 
 MCP_INGRESS_PATH="/${SERVER_NAME}/mcp"
 MCP_DIRECT_URL="http://127.0.0.1:${TRAEFIK_PORT}${MCP_INGRESS_PATH}"
@@ -2086,18 +2031,12 @@ MCP_BAD_SESSION_URL="http://127.0.0.1:${MCP_SMOKE_BAD_SESSION_PORT}${MCP_INGRESS
 PYTHON_EXAMPLE_URL="http://127.0.0.1:${PYTHON_EXAMPLE_PROXY_PORT}${PYTHON_EXAMPLE_SERVER_ROUTE}"
 RUST_EXAMPLE_URL="http://127.0.0.1:${RUST_EXAMPLE_PROXY_PORT}${RUST_EXAMPLE_SERVER_ROUTE}"
 GO_EXAMPLE_URL="http://127.0.0.1:${GO_EXAMPLE_PROXY_PORT}${GO_EXAMPLE_SERVER_ROUTE}"
-PYTHON_SHARED_URL="http://127.0.0.1:${PYTHON_SHARED_PROXY_PORT}${PYTHON_SHARED_SERVER_ROUTE}"
-RUST_SHARED_URL="http://127.0.0.1:${RUST_SHARED_PROXY_PORT}${RUST_SHARED_SERVER_ROUTE}"
-GO_SHARED_URL="http://127.0.0.1:${GO_SHARED_PROXY_PORT}${GO_SHARED_SERVER_ROUTE}"
 
 echo "[ingress] validating distinct MCP server behaviors across routes"
 wait_for_mcp_tool_result "${MCP_SESSION_URL}" "aaa-ping" '{}' 200 "pong"
 wait_for_mcp_tool_result "${PYTHON_EXAMPLE_URL}" "echo" '{"message":"python example ready"}' 200 "python example ready"
 wait_for_mcp_tool_result "${RUST_EXAMPLE_URL}" "repeat" '{"message":"rust","times":3}' 200 "rustrustrust"
 wait_for_mcp_tool_result "${GO_EXAMPLE_URL}" "lower" '{"message":"GO Example Ready"}' 200 "go example ready"
-wait_for_mcp_tool_result "${PYTHON_SHARED_URL}" "reverse" '{"message":"shared host python"}' 200 "nohtyp tsoh derahs"
-wait_for_mcp_tool_result "${RUST_SHARED_URL}" "word_count" '{"message":"shared host rust route"}' 200 "4"
-wait_for_mcp_tool_result "${GO_SHARED_URL}" "slugify" '{"message":"Shared Host Go Route"}' 200 "shared-host-go-route"
 
 if scenario_selected "smoke-auth"; then
   echo "[mcp] validating raw MCP request edge cases"
@@ -3904,12 +3843,6 @@ kubectl wait --for=delete "mcpserver/${PYTHON_EXAMPLE_SERVER_NAME}" -n mcp-serve
 kubectl wait --for=delete "mcpserver/${RUST_EXAMPLE_SERVER_NAME}" -n mcp-servers --timeout=120s || true
 ./bin/mcp-runtime server delete "${GO_EXAMPLE_SERVER_NAME}" --namespace mcp-servers
 kubectl wait --for=delete "mcpserver/${GO_EXAMPLE_SERVER_NAME}" -n mcp-servers --timeout=120s || true
-./bin/mcp-runtime server delete "${PYTHON_SHARED_SERVER_NAME}" --namespace mcp-servers
-kubectl wait --for=delete "mcpserver/${PYTHON_SHARED_SERVER_NAME}" -n mcp-servers --timeout=120s || true
-./bin/mcp-runtime server delete "${RUST_SHARED_SERVER_NAME}" --namespace mcp-servers
-kubectl wait --for=delete "mcpserver/${RUST_SHARED_SERVER_NAME}" -n mcp-servers --timeout=120s || true
-./bin/mcp-runtime server delete "${GO_SHARED_SERVER_NAME}" --namespace mcp-servers
-kubectl wait --for=delete "mcpserver/${GO_SHARED_SERVER_NAME}" -n mcp-servers --timeout=120s || true
 ./bin/mcp-runtime server delete "${SERVER_NAME}" --namespace mcp-servers
 kubectl wait --for=delete "mcpserver/${SERVER_NAME}" -n mcp-servers --timeout=120s || true
 

@@ -838,7 +838,7 @@ func TestCheckResourceReadiness(t *testing.T) {
 		assertEqual(t, "serviceReady", readiness.Service, false)
 		assertEqual(t, "ingressReady", readiness.Ingress, false)
 		assertEqual(t, "policyReady", readiness.Policy, false)
-		assertEqual(t, "canaryReady", readiness.Canary, true)
+		assertEqual(t, "canaryReady", readiness.Canary, false)
 	})
 }
 
@@ -959,6 +959,20 @@ func TestDeterminePhase(t *testing.T) {
 		}, gatewayDisabledMCP)
 		assertEqual(t, "phase", phase, "Ready")
 		assertEqual(t, "allReady", allReady, true)
+	})
+
+	t.Run("returns pending when optional resources are disabled and core resources are not ready", func(t *testing.T) {
+		gatewayDisabledMCP := &mcpv1alpha1.MCPServer{}
+		phase, allReady := determinePhase(resourceReadiness{
+			Deployment: false,
+			Service:    false,
+			Ingress:    false,
+			Gateway:    false,
+			Policy:     false,
+			Canary:     false,
+		}, gatewayDisabledMCP)
+		assertEqual(t, "phase", phase, "Pending")
+		assertEqual(t, "allReady", allReady, false)
 	})
 }
 
