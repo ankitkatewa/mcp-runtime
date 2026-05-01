@@ -599,7 +599,7 @@ metadata:
   name: %s
 `, name)
 	// #nosec G204 -- fixed kubectl command, input via stdin; name from internal code.
-	cmd, err := m.kubectl.CommandArgs([]string{"apply", "-f", "-"})
+	cmd, err := m.kubectl.CommandArgs([]string{"apply", "--validate=false", "-f", "-"})
 	if err != nil {
 		return err
 	}

@@ -299,7 +299,8 @@ until ./bin/mcp-runtime server policy inspect go-example-mcp --namespace mcp-ser
   sleep 2
 done
 
-# The proxy sidecar reloads the rendered policy file on a short polling loop.
+# The proxy sidecar reloads rendered policy on a short polling loop, so give the
+# gateway a few seconds to observe the new access session before the first tool call.
 sleep 6
 ```
 
@@ -357,6 +358,10 @@ curl -sS \
 
 You should see successful `tools/call` responses containing `5` and
 `HELLO WORLD`. Then verify Sentinel health and query the analytics API:
+
+The bundled Go example server also exposes `upper`, `lower`, `echo`, and
+`slugify`, and each of those tools expects a `message` field in `arguments`
+instead of `input` or `text`.
 
 ```bash
 ./bin/mcp-runtime sentinel status
