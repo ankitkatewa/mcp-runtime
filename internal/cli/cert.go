@@ -9,7 +9,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/spf13/cobra"
 	"go.uber.org/zap"
 )
 
@@ -32,65 +31,6 @@ type CertManager struct {
 // NewCertManager creates a CertManager with the given dependencies.
 func NewCertManager(kubectl KubectlRunner, logger *zap.Logger) *CertManager {
 	return &CertManager{kubectl: kubectl, logger: logger}
-}
-
-func (m *ClusterManager) newClusterCertCmd() *cobra.Command {
-	certMgr := NewCertManager(m.kubectl, m.logger)
-	cmd := &cobra.Command{
-		Use:   "cert",
-		Short: "Manage cert-manager resources",
-		Long:  "Manage cert-manager resources required for TLS in the MCP platform",
-	}
-
-	cmd.AddCommand(certMgr.newCertStatusCmd())
-	cmd.AddCommand(certMgr.newCertApplyCmd())
-	cmd.AddCommand(certMgr.newCertWaitCmd())
-
-	return cmd
-}
-
-func (m *CertManager) newCertStatusCmd() *cobra.Command {
-	cmd := &cobra.Command{
-		Use:   "status",
-		Short: "Check cert-manager resources",
-		Long:  "Check cert-manager installation, CA secret, issuer, and registry certificate",
-		RunE: func(cmd *cobra.Command, args []string) error {
-			return m.Status()
-		},
-	}
-
-	return cmd
-}
-
-func (m *CertManager) newCertApplyCmd() *cobra.Command {
-	cmd := &cobra.Command{
-		Use:   "apply",
-		Short: "Apply cert-manager resources",
-		Long:  "Apply ClusterIssuer and registry Certificate manifests",
-		RunE: func(cmd *cobra.Command, args []string) error {
-			return m.Apply()
-		},
-	}
-
-	return cmd
-}
-
-func (m *CertManager) newCertWaitCmd() *cobra.Command {
-	var timeout time.Duration
-	cmd := &cobra.Command{
-		Use:   "wait",
-		Short: "Wait for registry certificate readiness",
-		Long:  "Wait for the registry certificate to reach Ready state",
-		RunE: func(cmd *cobra.Command, args []string) error {
-			if timeout == 0 {
-				timeout = GetCertTimeout()
-			}
-			return m.Wait(timeout)
-		},
-	}
-
-	cmd.Flags().DurationVar(&timeout, "timeout", 0, "Timeout for certificate readiness (default from MCP_CERT_TIMEOUT)")
-	return cmd
 }
 
 // Status verifies cert-manager installation and required resources.

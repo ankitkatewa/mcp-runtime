@@ -13,7 +13,6 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/spf13/cobra"
 	"go.uber.org/zap"
 
 	"mcp-runtime/pkg/metadata"
@@ -23,34 +22,6 @@ import (
 
 // yamlMarshal is a test seam for yaml.Marshal.
 var yamlMarshal = yaml.Marshal
-
-func newBuildImageCmd(logger *zap.Logger) *cobra.Command {
-	var dockerfile string
-	var metadataFile string
-	var metadataDir string
-	var registryURL string
-	var tag string
-	var context string
-
-	cmd := &cobra.Command{
-		Use:   "image <server-name>",
-		Short: "Build Docker image for an MCP server",
-		Long:  `Build a Docker image from Dockerfile and update metadata file.`,
-		Args:  cobra.ExactArgs(1),
-		RunE: func(cmd *cobra.Command, args []string) error {
-			return buildImage(logger, args[0], dockerfile, metadataFile, metadataDir, registryURL, tag, context)
-		},
-	}
-
-	cmd.Flags().StringVar(&dockerfile, "dockerfile", "Dockerfile", "Path to Dockerfile")
-	cmd.Flags().StringVar(&metadataFile, "metadata-file", "", "Path to metadata file")
-	cmd.Flags().StringVar(&metadataDir, "metadata-dir", ".mcp", "Directory containing metadata files")
-	cmd.Flags().StringVar(&registryURL, "registry", "", "Registry URL (defaults to platform registry)")
-	cmd.Flags().StringVar(&tag, "tag", "", "Image tag (defaults to git SHA or 'latest')")
-	cmd.Flags().StringVar(&context, "context", ".", "Build context directory")
-
-	return cmd
-}
 
 func buildImage(logger *zap.Logger, serverName, dockerfile, metadataFile, metadataDir, registryURL, tag, context string) error {
 	// Get registry URL
@@ -104,6 +75,10 @@ func buildImage(logger *zap.Logger, serverName, dockerfile, metadataFile, metada
 	}
 
 	return nil
+}
+
+func BuildImage(logger *zap.Logger, serverName, dockerfile, metadataFile, metadataDir, registryURL, tag, context string) error {
+	return buildImage(logger, serverName, dockerfile, metadataFile, metadataDir, registryURL, tag, context)
 }
 
 func updateMetadataImage(serverName, imageName, tag, metadataFile, metadataDir string) error {

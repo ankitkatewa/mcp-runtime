@@ -12,24 +12,6 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-func TestNewServerCmd(t *testing.T) {
-	logger := zap.NewNop()
-	cmd := NewServerCmd(logger)
-
-	if cmd == nil {
-		t.Fatal("NewServerCmd should not return nil")
-	}
-
-	if cmd.Use != "server" {
-		t.Errorf("Expected command use 'server', got %q", cmd.Use)
-	}
-
-	subcommands := cmd.Commands()
-	if len(subcommands) == 0 {
-		t.Error("Server command should have subcommands")
-	}
-}
-
 func TestServerManager_ListServers(t *testing.T) {
 	t.Run("calls kubectl with correct args", func(t *testing.T) {
 		mock := &MockExecutor{
@@ -425,113 +407,6 @@ func contains(slice []string, val string) bool {
 		}
 	}
 	return false
-}
-
-func TestServerCmdSubcommandRunE(t *testing.T) {
-	t.Run("list_cmd_executes", func(t *testing.T) {
-		mock := &MockExecutor{}
-		kubectl := &KubectlClient{exec: mock, validators: nil}
-		mgr := NewServerManager(kubectl, zap.NewNop())
-
-		cmd := mgr.newServerListCmd()
-		err := cmd.RunE(cmd, nil)
-		if err != nil {
-			t.Fatalf("unexpected error: %v", err)
-		}
-		if !mock.HasCommand("kubectl") {
-			t.Error("expected kubectl to be called")
-		}
-	})
-
-	t.Run("get_cmd_executes", func(t *testing.T) {
-		mock := &MockExecutor{}
-		kubectl := &KubectlClient{exec: mock, validators: nil}
-		mgr := NewServerManager(kubectl, zap.NewNop())
-
-		cmd := mgr.newServerGetCmd()
-		err := cmd.RunE(cmd, []string{"my-server"})
-		if err != nil {
-			t.Fatalf("unexpected error: %v", err)
-		}
-		if !mock.HasCommand("kubectl") {
-			t.Error("expected kubectl to be called")
-		}
-	})
-
-	t.Run("delete_cmd_executes", func(t *testing.T) {
-		mock := &MockExecutor{}
-		kubectl := &KubectlClient{exec: mock, validators: nil}
-		mgr := NewServerManager(kubectl, zap.NewNop())
-
-		cmd := mgr.newServerDeleteCmd()
-		err := cmd.RunE(cmd, []string{"my-server"})
-		if err != nil {
-			t.Fatalf("unexpected error: %v", err)
-		}
-		if !mock.HasCommand("kubectl") {
-			t.Error("expected kubectl to be called")
-		}
-	})
-
-	t.Run("status_cmd_executes", func(t *testing.T) {
-		mock := &MockExecutor{
-			DefaultOutput: []byte("server1|image:tag|1|/path|false\n"),
-		}
-		kubectl := &KubectlClient{exec: mock, validators: nil}
-		mgr := NewServerManager(kubectl, zap.NewNop())
-
-		var buf bytes.Buffer
-		setDefaultPrinterWriter(t, &buf)
-
-		cmd := mgr.newServerStatusCmd()
-		err := cmd.RunE(cmd, nil)
-		if err != nil {
-			t.Fatalf("unexpected error: %v", err)
-		}
-	})
-
-	t.Run("logs_cmd_executes", func(t *testing.T) {
-		mock := &MockExecutor{}
-		kubectl := &KubectlClient{exec: mock, validators: nil}
-		mgr := NewServerManager(kubectl, zap.NewNop())
-
-		cmd := mgr.newServerLogsCmd()
-		err := cmd.RunE(cmd, []string{"my-server"})
-		if err != nil {
-			t.Fatalf("unexpected error: %v", err)
-		}
-		if !contains(mock.LastCommand().Args, "--all-containers=true") {
-			t.Fatalf("expected logs command to include --all-containers=true, got %v", mock.LastCommand().Args)
-		}
-	})
-
-	t.Run("create_cmd_with_file", func(t *testing.T) {
-		mock := &MockExecutor{}
-		kubectl := &KubectlClient{exec: mock, validators: nil}
-		mgr := NewServerManager(kubectl, zap.NewNop())
-
-		tmpFile, err := os.CreateTemp("", "mcpserver-*.yaml")
-		if err != nil {
-			t.Fatal(err)
-		}
-		defer os.Remove(tmpFile.Name())
-		if _, err := tmpFile.WriteString("apiVersion: v1\nkind: MCPServer\n"); err != nil {
-			t.Fatal(err)
-		}
-		tmpFile.Close()
-
-		cmd := mgr.newServerCreateCmd()
-		if err := cmd.Flags().Set("file", tmpFile.Name()); err != nil {
-			t.Fatal(err)
-		}
-		err = cmd.RunE(cmd, []string{"my-server"})
-		if err != nil {
-			t.Fatalf("unexpected error: %v", err)
-		}
-		if !contains(mock.LastCommand().Args, "apply") {
-			t.Error("expected apply command")
-		}
-	})
 }
 
 func TestValidateServerInputErrors(t *testing.T) {

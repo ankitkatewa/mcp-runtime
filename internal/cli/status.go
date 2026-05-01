@@ -8,7 +8,6 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/spf13/cobra"
 	"go.uber.org/zap"
 )
 
@@ -36,21 +35,7 @@ var analyticsStatusWorkloads = []platformWorkload{
 	{Component: "Promtail", Namespace: defaultAnalyticsNamespace, Kind: "daemonset", Name: "promtail"},
 }
 
-// NewStatusCmd returns the status subcommand for platform health checks.
-func NewStatusCmd(logger *zap.Logger) *cobra.Command {
-	cmd := &cobra.Command{
-		Use:   "status",
-		Short: "Show platform status",
-		Long:  "Show the overall status of the MCP platform",
-		RunE: func(cmd *cobra.Command, args []string) error {
-			return showPlatformStatus(logger)
-		},
-	}
-
-	return cmd
-}
-
-func showPlatformStatus(logger *zap.Logger) error {
+func ShowPlatformStatus(logger *zap.Logger) error {
 	Header("MCP Platform Status")
 	DefaultPrinter.Println()
 

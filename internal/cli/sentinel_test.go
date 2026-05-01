@@ -1,40 +1,10 @@
 package cli
 
 import (
-	"strings"
 	"testing"
 
 	"go.uber.org/zap"
 )
-
-func TestNewSentinelCmd(t *testing.T) {
-	cmd := NewSentinelCmd(zap.NewNop())
-	if cmd == nil {
-		t.Fatal("NewSentinelCmd should not return nil")
-	}
-	if cmd.Use != "sentinel" {
-		t.Fatalf("expected Use='sentinel', got %q", cmd.Use)
-	}
-
-	expected := map[string]bool{
-		"status":       false,
-		"logs":         false,
-		"events":       false,
-		"port-forward": false,
-		"restart":      false,
-	}
-	for _, sub := range cmd.Commands() {
-		name := strings.Fields(sub.Use)[0]
-		if _, ok := expected[name]; ok {
-			expected[name] = true
-		}
-	}
-	for name, found := range expected {
-		if !found {
-			t.Fatalf("expected subcommand %q not found", name)
-		}
-	}
-}
 
 func TestSentinelManager_ViewSentinelLogs(t *testing.T) {
 	mock := &MockExecutor{}

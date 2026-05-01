@@ -12,7 +12,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/spf13/cobra"
 	"go.uber.org/zap"
 	"gopkg.in/yaml.v3"
 )
@@ -41,196 +40,107 @@ func DefaultRegistryManager(logger *zap.Logger) *RegistryManager {
 	return NewRegistryManager(kubectlClient, execExecutor, logger)
 }
 
-// NewRegistryCmd builds the registry subcommand for managing registry lifecycle.
-func NewRegistryCmd(logger *zap.Logger) *cobra.Command {
-	mgr := DefaultRegistryManager(logger)
-	return NewRegistryCmdWithManager(mgr)
+// RunRegistryProvision contains the registry provision command flow for folder packages.
+func RunRegistryProvision(mgr *RegistryManager, url, username, password, operatorImage string) error {
+	flagCfg := &ExternalRegistryConfig{
+		URL:      url,
+		Username: username,
+		Password: password,
+	}
+	cfg, err := resolveExternalRegistryConfig(flagCfg)
+	if err != nil {
+		return err
+	}
+	if cfg == nil || cfg.URL == "" {
+		err := newWithSentinel(ErrRegistryURLRequired, "registry url is required (flag, env PROVISIONED_REGISTRY_URL, or config file)")
+		Error("Registry URL required")
+		logStructuredError(mgr.logger, err, "Registry URL required")
+		return err
+	}
+	if err := saveExternalRegistryConfig(cfg); err != nil {
+		wrappedErr := wrapWithSentinel(ErrSaveRegistryConfigFailed, err, fmt.Sprintf("failed to save registry config: %v", err))
+		Error("Failed to save registry config")
+		logStructuredError(mgr.logger, wrappedErr, "Failed to save registry config")
+		return wrappedErr
+	}
+	if cfg.Username != "" && cfg.Password != "" {
+		mgr.logger.Info("Performing docker login to external registry", zap.String("url", cfg.URL))
+		if err := mgr.LoginRegistry(cfg.URL, cfg.Username, cfg.Password); err != nil {
+			return err
+		}
+	}
+	if operatorImage != "" {
+		mgr.logger.Info("Building and pushing operator image to external registry", zap.String("image", operatorImage))
+		if err := buildOperatorImage(operatorImage); err != nil {
+			wrappedErr := wrapWithSentinelAndContext(
+				ErrBuildOperatorImageFailed,
+				err,
+				fmt.Sprintf("failed to build operator image: %v", err),
+				map[string]any{"image": operatorImage, "component": "registry"},
+			)
+			Error("Failed to build operator image")
+			logStructuredError(mgr.logger, wrappedErr, "Failed to build operator image")
+			return wrappedErr
+		}
+		if err := pushOperatorImage(operatorImage); err != nil {
+			wrappedErr := wrapWithSentinelAndContext(
+				ErrPushOperatorImageFailed,
+				err,
+				fmt.Sprintf("failed to push operator image: %v", err),
+				map[string]any{"image": operatorImage, "component": "registry"},
+			)
+			Error("Failed to push operator image")
+			logStructuredError(mgr.logger, wrappedErr, "Failed to push operator image")
+			return wrappedErr
+		}
+	}
+	mgr.logger.Info("External registry configured", zap.String("url", cfg.URL))
+	fmt.Printf("External registry configured: %s\n", cfg.URL)
+	return nil
 }
 
-// NewRegistryCmdWithManager returns the registry subcommand using the provided manager.
-func NewRegistryCmdWithManager(mgr *RegistryManager) *cobra.Command {
-	cmd := &cobra.Command{
-		Use:   "registry",
-		Short: "Manage container registry",
-		Long:  "Commands for managing the container registry",
+// RunRegistryPush contains the registry push command flow for folder packages.
+func RunRegistryPush(mgr *RegistryManager, image, registryURL, name, mode, helperNamespace string) error {
+	if image == "" {
+		err := newWithSentinel(ErrImageRequired, "image is required (use --image)")
+		Error("Image required")
+		logStructuredError(mgr.logger, err, "Image required")
+		return err
+	}
+	targetRegistry := registryURL
+	if targetRegistry == "" {
+		if ext, err := resolveExternalRegistryConfig(nil); err == nil && ext != nil && ext.URL != "" {
+			targetRegistry = strings.TrimSuffix(ext.URL, "/")
+		}
+	}
+	if targetRegistry == "" {
+		targetRegistry = getPlatformRegistryURL(mgr.logger)
 	}
 
-	cmd.AddCommand(mgr.newRegistryStatusCmd())
-	cmd.AddCommand(mgr.newRegistryInfoCmd())
-	cmd.AddCommand(mgr.newRegistryProvisionCmd())
-	cmd.AddCommand(mgr.newRegistryPushCmd())
-
-	return cmd
-}
-
-func (m *RegistryManager) newRegistryStatusCmd() *cobra.Command {
-	var namespace string
-
-	cmd := &cobra.Command{
-		Use:   "status",
-		Short: "Check registry status",
-		Long:  "Check the status of the container registry",
-		RunE: func(cmd *cobra.Command, args []string) error {
-			return m.CheckRegistryStatus(namespace)
-		},
+	repo, tag := splitImage(image)
+	if name != "" {
+		repo = name
+	} else {
+		repo = dropRegistryPrefix(repo)
+	}
+	target := targetRegistry + "/" + repo
+	if tag != "" {
+		target = target + ":" + tag
 	}
 
-	cmd.Flags().StringVar(&namespace, "namespace", NamespaceRegistry, "Registry namespace")
+	mgr.logger.Info("Pushing image", zap.String("source", image), zap.String("target", target))
 
-	return cmd
-}
-
-func (m *RegistryManager) newRegistryInfoCmd() *cobra.Command {
-	cmd := &cobra.Command{
-		Use:   "info",
-		Short: "Show registry information",
-		Long:  "Show registry URL and connection information",
-		RunE: func(cmd *cobra.Command, args []string) error {
-			return m.ShowRegistryInfo()
-		},
+	switch mode {
+	case "direct":
+		return mgr.PushDirect(image, target)
+	case "in-cluster":
+		return mgr.PushInCluster(image, target, helperNamespace)
+	default:
+		err := newWithSentinel(ErrUnknownRegistryMode, fmt.Sprintf("unknown mode %q (use direct|in-cluster)", mode))
+		Error("Unknown registry mode")
+		logStructuredError(mgr.logger, err, "Unknown registry mode")
+		return err
 	}
-
-	return cmd
-}
-
-func (m *RegistryManager) newRegistryProvisionCmd() *cobra.Command {
-	var url string
-	var username string
-	var password string
-	var operatorImage string
-
-	cmd := &cobra.Command{
-		Use:   "provision",
-		Short: "Configure an external registry",
-		Long:  "Configure an external registry to be used for operator/runtime images",
-		RunE: func(cmd *cobra.Command, args []string) error {
-			flagCfg := &ExternalRegistryConfig{
-				URL:      url,
-				Username: username,
-				Password: password,
-			}
-			cfg, err := resolveExternalRegistryConfig(flagCfg)
-			if err != nil {
-				return err
-			}
-			if cfg == nil || cfg.URL == "" {
-				err := newWithSentinel(ErrRegistryURLRequired, "registry url is required (flag, env PROVISIONED_REGISTRY_URL, or config file)")
-				Error("Registry URL required")
-				logStructuredError(m.logger, err, "Registry URL required")
-				return err
-			}
-			if err := saveExternalRegistryConfig(cfg); err != nil {
-				wrappedErr := wrapWithSentinel(ErrSaveRegistryConfigFailed, err, fmt.Sprintf("failed to save registry config: %v", err))
-				Error("Failed to save registry config")
-				logStructuredError(m.logger, wrappedErr, "Failed to save registry config")
-				return wrappedErr
-			}
-			if cfg.Username != "" && cfg.Password != "" {
-				m.logger.Info("Performing docker login to external registry", zap.String("url", cfg.URL))
-				if err := m.LoginRegistry(cfg.URL, cfg.Username, cfg.Password); err != nil {
-					return err
-				}
-			}
-			if operatorImage != "" {
-				m.logger.Info("Building and pushing operator image to external registry", zap.String("image", operatorImage))
-				if err := buildOperatorImage(operatorImage); err != nil {
-					wrappedErr := wrapWithSentinelAndContext(
-						ErrBuildOperatorImageFailed,
-						err,
-						fmt.Sprintf("failed to build operator image: %v", err),
-						map[string]any{"image": operatorImage, "component": "registry"},
-					)
-					Error("Failed to build operator image")
-					logStructuredError(m.logger, wrappedErr, "Failed to build operator image")
-					return wrappedErr
-				}
-				if err := pushOperatorImage(operatorImage); err != nil {
-					wrappedErr := wrapWithSentinelAndContext(
-						ErrPushOperatorImageFailed,
-						err,
-						fmt.Sprintf("failed to push operator image: %v", err),
-						map[string]any{"image": operatorImage, "component": "registry"},
-					)
-					Error("Failed to push operator image")
-					logStructuredError(m.logger, wrappedErr, "Failed to push operator image")
-					return wrappedErr
-				}
-			}
-			m.logger.Info("External registry configured", zap.String("url", cfg.URL))
-			fmt.Printf("External registry configured: %s\n", cfg.URL)
-			return nil
-		},
-	}
-
-	cmd.Flags().StringVar(&url, "url", "", "External registry URL (e.g., registry.mcpruntime.com)")
-	cmd.Flags().StringVar(&username, "username", "", "Registry username (optional)")
-	cmd.Flags().StringVar(&password, "password", "", "Registry password (optional)")
-	cmd.Flags().StringVar(&operatorImage, "operator-image", "", "Optional: build and push operator image to this external registry (e.g., <registry>/mcp-runtime-operator:latest)")
-
-	return cmd
-}
-
-func (m *RegistryManager) newRegistryPushCmd() *cobra.Command {
-	var image string
-	var registryURL string
-	var name string
-	var mode string
-	var helperNamespace string
-
-	cmd := &cobra.Command{
-		Use:   "push",
-		Short: "Retag and push an image to the platform or provisioned registry",
-		RunE: func(cmd *cobra.Command, args []string) error {
-			if image == "" {
-				err := newWithSentinel(ErrImageRequired, "image is required (use --image)")
-				Error("Image required")
-				logStructuredError(m.logger, err, "Image required")
-				return err
-			}
-			targetRegistry := registryURL
-			if targetRegistry == "" {
-				if ext, err := resolveExternalRegistryConfig(nil); err == nil && ext != nil && ext.URL != "" {
-					targetRegistry = strings.TrimSuffix(ext.URL, "/")
-				}
-			}
-			if targetRegistry == "" {
-				targetRegistry = getPlatformRegistryURL(m.logger)
-			}
-
-			repo, tag := splitImage(image)
-			if name != "" {
-				repo = name
-			} else {
-				repo = dropRegistryPrefix(repo)
-			}
-			target := targetRegistry + "/" + repo
-			if tag != "" {
-				target = target + ":" + tag
-			}
-
-			m.logger.Info("Pushing image", zap.String("source", image), zap.String("target", target))
-
-			switch mode {
-			case "direct":
-				return m.PushDirect(image, target)
-			case "in-cluster":
-				return m.PushInCluster(image, target, helperNamespace)
-			default:
-				err := newWithSentinel(ErrUnknownRegistryMode, fmt.Sprintf("unknown mode %q (use direct|in-cluster)", mode))
-				Error("Unknown registry mode")
-				logStructuredError(m.logger, err, "Unknown registry mode")
-				return err
-			}
-		},
-	}
-
-	cmd.Flags().StringVar(&image, "image", "", "Local image to push (required)")
-	cmd.Flags().StringVar(&registryURL, "registry", "", "Target registry (defaults to provisioned or internal)")
-	cmd.Flags().StringVar(&name, "name", "", "Override target repo/name (default: source name without registry)")
-	cmd.Flags().StringVar(&mode, "mode", "in-cluster", "Push mode: in-cluster (default, uses skopeo helper) or direct (docker push)")
-	cmd.Flags().StringVar(&helperNamespace, "namespace", NamespaceRegistry, "Namespace to run the in-cluster helper pod")
-
-	return cmd
 }
 
 type ExternalRegistryConfig struct {

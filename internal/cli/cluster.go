@@ -10,7 +10,6 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/spf13/cobra"
 	"go.uber.org/zap"
 )
 
@@ -43,135 +42,14 @@ func DefaultClusterManager(logger *zap.Logger) *ClusterManager {
 	return NewClusterManager(kubectlClient, execExecutor, logger)
 }
 
-// NewClusterCmd returns the root cluster subcommand (status/init/provision).
-func NewClusterCmd(logger *zap.Logger) *cobra.Command {
-	mgr := DefaultClusterManager(logger)
-	return NewClusterCmdWithManager(mgr)
+// KubectlRunner exposes the shared kubectl runner for foldered command routing.
+func (m *ClusterManager) KubectlRunner() KubectlRunner {
+	return m.kubectl
 }
 
-// NewClusterCmdWithManager returns the cluster subcommand using the provided manager.
-func NewClusterCmdWithManager(mgr *ClusterManager) *cobra.Command {
-	cmd := &cobra.Command{
-		Use:   "cluster",
-		Short: "Manage Kubernetes cluster",
-		Long:  "Commands for managing the Kubernetes cluster",
-	}
-
-	cmd.AddCommand(mgr.newClusterInitCmd())
-	cmd.AddCommand(mgr.newClusterStatusCmd())
-	cmd.AddCommand(mgr.newClusterConfigCmd())
-	cmd.AddCommand(mgr.newClusterProvisionCmd())
-	cmd.AddCommand(mgr.newClusterCertCmd())
-	cmd.AddCommand(mgr.newClusterDoctorCmd())
-
-	return cmd
-}
-
-func (m *ClusterManager) newClusterInitCmd() *cobra.Command {
-	var kubeconfig string
-	var context string
-
-	cmd := &cobra.Command{
-		Use:   "init",
-		Short: "Initialize cluster configuration",
-		Long:  "Initialize and configure the Kubernetes cluster for MCP platform",
-		RunE: func(cmd *cobra.Command, args []string) error {
-			return m.InitCluster(kubeconfig, context)
-		},
-	}
-
-	cmd.Flags().StringVar(&kubeconfig, "kubeconfig", "", "Path to kubeconfig file (default: ~/.kube/config)")
-	cmd.Flags().StringVar(&context, "context", "", "Kubernetes context to use")
-
-	return cmd
-}
-
-func (m *ClusterManager) newClusterStatusCmd() *cobra.Command {
-	cmd := &cobra.Command{
-		Use:   "status",
-		Short: "Check cluster status",
-		Long:  "Check the status of the Kubernetes cluster",
-		RunE: func(cmd *cobra.Command, args []string) error {
-			return m.CheckClusterStatus()
-		},
-	}
-
-	return cmd
-}
-
-func (m *ClusterManager) newClusterConfigCmd() *cobra.Command {
-	var ingressMode string
-	var ingressManifest string
-	var forceIngressInstall bool
-	var kubeconfig string
-	var context string
-	var provider string
-	var region string
-	var clusterName string
-	var resourceGroup string
-	var project string
-	var zone string
-
-	cmd := &cobra.Command{
-		Use:   "config",
-		Short: "Configure cluster settings",
-		Long:  "Configure cluster settings like ingress and kubeconfig context",
-		RunE: func(cmd *cobra.Command, args []string) error {
-			if provider != "" {
-				if err := m.ConfigureKubeconfigFromProvider(provider, region, clusterName, resourceGroup, project, zone, kubeconfig); err != nil {
-					return err
-				}
-			}
-			if kubeconfig != "" || context != "" || provider != "" {
-				if err := m.ConfigureKubeconfig(kubeconfig, context); err != nil {
-					return err
-				}
-			}
-			opts := ingressOptions{
-				mode:     ingressMode,
-				manifest: ingressManifest,
-				force:    forceIngressInstall,
-			}
-			return m.ConfigureCluster(opts)
-		},
-	}
-
-	cmd.Flags().StringVar(&ingressMode, "ingress", "traefik", "Ingress controller to install (traefik|none)")
-	cmd.Flags().StringVar(&ingressManifest, "ingress-manifest", "config/ingress/overlays/prod", "Manifest to apply when installing the ingress controller")
-	cmd.Flags().BoolVar(&forceIngressInstall, "force-ingress-install", false, "Force ingress install even if an ingress class already exists")
-	cmd.Flags().StringVar(&kubeconfig, "kubeconfig", "", "Path to kubeconfig file (default: ~/.kube/config)")
-	cmd.Flags().StringVar(&context, "context", "", "Kubernetes context to use")
-	cmd.Flags().StringVar(&provider, "provider", "", "Cloud provider for kubeconfig (eks; aks/gke planned)")
-	cmd.Flags().StringVar(&region, "region", "us-west-1", "Region for cloud provider kubeconfig")
-	cmd.Flags().StringVar(&clusterName, "name", defaultClusterName, "Cluster name for cloud provider kubeconfig")
-	cmd.Flags().StringVar(&resourceGroup, "resource-group", "", "Resource group (AKS, planned)")
-	cmd.Flags().StringVar(&project, "project", "", "Project ID (GKE, planned)")
-	cmd.Flags().StringVar(&zone, "zone", "", "Zone (GKE, planned)")
-
-	return cmd
-}
-
-func (m *ClusterManager) newClusterProvisionCmd() *cobra.Command {
-	var provider string
-	var region string
-	var nodeCount int
-	var clusterName string
-
-	cmd := &cobra.Command{
-		Use:   "provision",
-		Short: "Provision a new cluster",
-		Long:  "Provision a new Kubernetes cluster (requires cloud provider credentials)",
-		RunE: func(cmd *cobra.Command, args []string) error {
-			return m.ProvisionCluster(provider, region, nodeCount, clusterName)
-		},
-	}
-
-	cmd.Flags().StringVar(&provider, "provider", "kind", "Cloud provider (kind, gke, eks, aks)")
-	cmd.Flags().StringVar(&region, "region", "us-west-1", "Region for cluster")
-	cmd.Flags().IntVar(&nodeCount, "nodes", 3, "Number of nodes")
-	cmd.Flags().StringVar(&clusterName, "name", defaultClusterName, "Cluster name (used by supported providers)")
-
-	return cmd
+// Logger exposes the shared logger for foldered command routing.
+func (m *ClusterManager) Logger() *zap.Logger {
+	return m.logger
 }
 
 // InitCluster initializes cluster configuration.
@@ -443,6 +321,15 @@ func (m *ClusterManager) ConfigureCluster(ingress ingressOptions) error {
 	m.logger.Info("Ingress controller installed successfully", zap.String("ingress", ingress.mode))
 	m.logger.Info("Cluster configuration complete")
 	return nil
+}
+
+// ConfigureClusterWithValues adapts exported flag values into the internal ingress options shape.
+func (m *ClusterManager) ConfigureClusterWithValues(mode, manifest string, force bool) error {
+	return m.ConfigureCluster(ingressOptions{
+		mode:     mode,
+		manifest: manifest,
+		force:    force,
+	})
 }
 
 // ProvisionCluster provisions a new Kubernetes cluster.

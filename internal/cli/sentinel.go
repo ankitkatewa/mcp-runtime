@@ -7,7 +7,6 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/spf13/cobra"
 	"go.uber.org/zap"
 )
 
@@ -112,28 +111,7 @@ func DefaultSentinelManager(logger *zap.Logger) *SentinelManager {
 	return NewSentinelManager(kubectlClient, logger)
 }
 
-func NewSentinelCmd(logger *zap.Logger) *cobra.Command {
-	mgr := DefaultSentinelManager(logger)
-	return NewSentinelCmdWithManager(mgr)
-}
-
-func NewSentinelCmdWithManager(mgr *SentinelManager) *cobra.Command {
-	cmd := &cobra.Command{
-		Use:   "sentinel",
-		Short: "Operate the bundled mcp-sentinel stack",
-		Long:  "Commands for inspecting and operating the bundled mcp-sentinel analytics, gateway, and observability stack.",
-	}
-
-	cmd.AddCommand(mgr.newSentinelStatusCmd())
-	cmd.AddCommand(mgr.newSentinelLogsCmd())
-	cmd.AddCommand(mgr.newSentinelEventsCmd())
-	cmd.AddCommand(mgr.newSentinelPortForwardCmd())
-	cmd.AddCommand(mgr.newSentinelRestartCmd())
-
-	return cmd
-}
-
-func sentinelComponentKeys() []string {
+func SentinelComponentKeys() []string {
 	keys := make([]string, 0, len(sentinelComponents))
 	for _, component := range sentinelComponents {
 		keys = append(keys, component.Key)
@@ -156,7 +134,7 @@ func findSentinelComponent(name string) (*sentinelComponent, error) {
 		}
 	}
 
-	return nil, newWithSentinel(nil, fmt.Sprintf("unknown sentinel component %q (use one of: %s)", name, strings.Join(sentinelComponentKeys(), ", ")))
+	return nil, newWithSentinel(nil, fmt.Sprintf("unknown sentinel component %q (use one of: %s)", name, strings.Join(SentinelComponentKeys(), ", ")))
 }
 
 func findSentinelPortTarget(name string) (*sentinelPortTarget, error) {
@@ -168,95 +146,6 @@ func findSentinelPortTarget(name string) (*sentinelPortTarget, error) {
 		return nil, newWithSentinel(nil, fmt.Sprintf("component %q does not expose a predefined port-forward target", name))
 	}
 	return component.PortTarget, nil
-}
-
-func (m *SentinelManager) newSentinelStatusCmd() *cobra.Command {
-	return &cobra.Command{
-		Use:   "status",
-		Short: "Show mcp-sentinel stack status",
-		RunE: func(cmd *cobra.Command, args []string) error {
-			return m.ShowSentinelStatus()
-		},
-	}
-}
-
-func (m *SentinelManager) newSentinelLogsCmd() *cobra.Command {
-	var follow bool
-	var previous bool
-	var tail int
-	var since string
-
-	cmd := &cobra.Command{
-		Use:       "logs [component]",
-		Short:     "View logs for a mcp-sentinel component",
-		Args:      cobra.ExactArgs(1),
-		ValidArgs: sentinelComponentKeys(),
-		RunE: func(cmd *cobra.Command, args []string) error {
-			return m.ViewSentinelLogs(args[0], follow, previous, tail, since)
-		},
-	}
-
-	cmd.Flags().BoolVar(&follow, "follow", false, "Follow log output")
-	cmd.Flags().BoolVar(&previous, "previous", false, "Show logs from the previous container instance")
-	cmd.Flags().IntVar(&tail, "tail", 200, "Number of recent log lines to show (-1 for all)")
-	cmd.Flags().StringVar(&since, "since", "", "Only return logs newer than a relative duration like 5m or 1h")
-
-	return cmd
-}
-
-func (m *SentinelManager) newSentinelEventsCmd() *cobra.Command {
-	return &cobra.Command{
-		Use:   "events",
-		Short: "Show recent Kubernetes events for mcp-sentinel",
-		RunE: func(cmd *cobra.Command, args []string) error {
-			return m.ShowSentinelEvents()
-		},
-	}
-}
-
-func (m *SentinelManager) newSentinelPortForwardCmd() *cobra.Command {
-	var localPort int
-	var address string
-
-	cmd := &cobra.Command{
-		Use:   "port-forward [target]",
-		Short: "Port-forward a common mcp-sentinel service",
-		Args:  cobra.ExactArgs(1),
-		RunE: func(cmd *cobra.Command, args []string) error {
-			return m.PortForwardSentinelTarget(args[0], localPort, address)
-		},
-	}
-
-	cmd.Flags().IntVar(&localPort, "port", 0, "Local port to bind (defaults to the target service port)")
-	cmd.Flags().StringVar(&address, "address", "127.0.0.1", "Addresses to listen on")
-
-	return cmd
-}
-
-func (m *SentinelManager) newSentinelRestartCmd() *cobra.Command {
-	var restartAll bool
-
-	cmd := &cobra.Command{
-		Use:   "restart [component]",
-		Short: "Restart one or all mcp-sentinel workloads",
-		Args: func(cmd *cobra.Command, args []string) error {
-			if restartAll && len(args) == 0 {
-				return nil
-			}
-			return cobra.ExactArgs(1)(cmd, args)
-		},
-		RunE: func(cmd *cobra.Command, args []string) error {
-			component := ""
-			if len(args) > 0 {
-				component = args[0]
-			}
-			return m.RestartSentinel(component, restartAll)
-		},
-	}
-
-	cmd.Flags().BoolVar(&restartAll, "all", false, "Restart every mcp-sentinel workload")
-
-	return cmd
 }
 
 func (m *SentinelManager) ShowSentinelStatus() error {

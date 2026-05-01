@@ -27,6 +27,10 @@ func resolveRegularFilePath(file string) (string, error) {
 	return absPath, nil
 }
 
+func ResolveRegularFilePath(file string) (string, error) {
+	return resolveRegularFilePath(file)
+}
+
 func readFileAtPath(path string) ([]byte, error) {
 	absPath, err := filepath.Abs(path)
 	if err != nil {
@@ -55,6 +59,10 @@ func readFileAtPath(path string) ([]byte, error) {
 	defer file.Close()
 
 	return io.ReadAll(file)
+}
+
+func ReadFileAtPath(path string) ([]byte, error) {
+	return readFileAtPath(path)
 }
 
 func applyManifestFromFile(kubectl *KubectlClient, file string, stdout, stderr io.Writer) error {

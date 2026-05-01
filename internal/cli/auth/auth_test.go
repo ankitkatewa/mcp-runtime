@@ -1,4 +1,4 @@
-package cli
+package auth
 
 import (
 	"bytes"
@@ -12,12 +12,13 @@ import (
 	"time"
 
 	"go.uber.org/zap"
+	"mcp-runtime/internal/cli"
 	"mcp-runtime/pkg/authfile"
 )
 
 func TestVerifyPlatformAPIToken(t *testing.T) {
-	prevHook := authHTTPDoHook
-	authHTTPDoHook = func(r *http.Request) (*http.Response, error) {
+	prevHook := httpDoHook
+	httpDoHook = func(r *http.Request) (*http.Response, error) {
 		if r.URL.Path != "/api/auth/me" {
 			t.Errorf("path: %q", r.URL.Path)
 			return &http.Response{StatusCode: http.StatusInternalServerError, Body: io.NopCloser(bytes.NewReader(nil))}, nil
@@ -28,7 +29,7 @@ func TestVerifyPlatformAPIToken(t *testing.T) {
 		}
 		return &http.Response{StatusCode: http.StatusOK, Body: io.NopCloser(bytes.NewReader([]byte("[]")))}, nil
 	}
-	defer func() { authHTTPDoHook = prevHook }()
+	defer func() { httpDoHook = prevHook }()
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
 	if err := verifyPlatformAPIToken(ctx, "https://platform.example.com", "k"); err != nil {
@@ -36,12 +37,12 @@ func TestVerifyPlatformAPIToken(t *testing.T) {
 	}
 }
 
-func TestVerifyPlatformAPIToken_Unauthorized(t *testing.T) {
-	prevHook := authHTTPDoHook
-	authHTTPDoHook = func(_ *http.Request) (*http.Response, error) {
+func TestVerifyPlatformAPITokenUnauthorized(t *testing.T) {
+	prevHook := httpDoHook
+	httpDoHook = func(_ *http.Request) (*http.Response, error) {
 		return &http.Response{StatusCode: http.StatusUnauthorized, Body: io.NopCloser(bytes.NewReader(nil))}, nil
 	}
-	defer func() { authHTTPDoHook = prevHook }()
+	defer func() { httpDoHook = prevHook }()
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
 	if err := verifyPlatformAPIToken(ctx, "https://platform.example.com", "k"); err == nil {
@@ -53,8 +54,8 @@ func TestAuthLoginSavesAndVerifies(t *testing.T) {
 	d := t.TempDir()
 	t.Setenv("MCP_RUNTIME_CONFIG_DIR", d)
 
-	prevHTTPHook := authHTTPDoHook
-	authHTTPDoHook = func(r *http.Request) (*http.Response, error) {
+	prevHTTPHook := httpDoHook
+	httpDoHook = func(r *http.Request) (*http.Response, error) {
 		if r.URL.Path != "/api/auth/me" {
 			t.Errorf("path: %q", r.URL.Path)
 		}
@@ -63,9 +64,9 @@ func TestAuthLoginSavesAndVerifies(t *testing.T) {
 		}
 		return &http.Response{StatusCode: http.StatusOK, Body: io.NopCloser(bytes.NewReader([]byte("[]")))}, nil
 	}
-	defer func() { authHTTPDoHook = prevHTTPHook }()
+	defer func() { httpDoHook = prevHTTPHook }()
 
-	cmd := NewAuthCmd(zap.NewNop())
+	cmd := New(cli.NewRuntime(zap.NewNop()))
 	var out, errb bytes.Buffer
 	cmd.SetOut(&out)
 	cmd.SetErr(&errb)
@@ -93,8 +94,8 @@ func TestAuthLoginSavesAndVerifies(t *testing.T) {
 func TestAuthLoginNormalizesTrailingAPIPath(t *testing.T) {
 	d := t.TempDir()
 	t.Setenv("MCP_RUNTIME_CONFIG_DIR", d)
-	previousHook := authAPITestHook
-	authAPITestHook = func(_ context.Context, apiBaseURL, token string) error {
+	previousHook := apiTestHook
+	apiTestHook = func(_ context.Context, apiBaseURL, token string) error {
 		if apiBaseURL != "https://platform.example.com" {
 			t.Fatalf("apiBaseURL = %q, want https://platform.example.com", apiBaseURL)
 		}
@@ -103,9 +104,9 @@ func TestAuthLoginNormalizesTrailingAPIPath(t *testing.T) {
 		}
 		return nil
 	}
-	defer func() { authAPITestHook = previousHook }()
+	defer func() { apiTestHook = previousHook }()
 
-	cmd := NewAuthCmd(zap.NewNop())
+	cmd := New(cli.NewRuntime(zap.NewNop()))
 	cmd.SetArgs([]string{"login", "--api-url", "https://platform.example.com/api/", "--token", "good"})
 	if err := cmd.Execute(); err != nil {
 		t.Fatalf("execute: %v", err)
