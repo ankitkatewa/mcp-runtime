@@ -23,6 +23,16 @@ func (r *Runtime) KubectlRunner() KubectlRunner {
 	return DefaultKubectlRunner()
 }
 
+// KubectlClient returns the shared kubectl client.
+func (r *Runtime) KubectlClient() *KubectlClient {
+	return kubectlClient
+}
+
+// Executor returns the shared process executor.
+func (r *Runtime) Executor() Executor {
+	return execExecutor
+}
+
 // AccessManager returns the access command manager.
 func (r *Runtime) AccessManager() *AccessManager {
 	return DefaultAccessManager(r.logger)
@@ -31,11 +41,6 @@ func (r *Runtime) AccessManager() *AccessManager {
 // ClusterManager returns the cluster command manager.
 func (r *Runtime) ClusterManager() *ClusterManager {
 	return DefaultClusterManager(r.logger)
-}
-
-// PipelineManager returns the pipeline command manager.
-func (r *Runtime) PipelineManager() *PipelineManager {
-	return DefaultPipelineManager(r.logger)
 }
 
 // RegistryManager returns the registry command manager.

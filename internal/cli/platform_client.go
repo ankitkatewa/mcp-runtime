@@ -56,6 +56,11 @@ func newPlatformClient() (*platformClient, error) {
 	}, nil
 }
 
+func HasPlatformClient() bool {
+	_, err := newPlatformClient()
+	return err == nil
+}
+
 func (c *platformClient) do(ctx context.Context, method, relPath, query string, body io.Reader) (*http.Response, error) {
 	u, err := url.Parse(c.baseURL)
 	if err != nil {

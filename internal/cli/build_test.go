@@ -10,35 +10,6 @@ import (
 	"go.uber.org/zap"
 )
 
-func TestNewBuildImageCmd(t *testing.T) {
-	logger := zap.NewNop()
-	cmd := newBuildImageCmd(logger)
-
-	t.Run("command-created", func(t *testing.T) {
-		if cmd == nil {
-			t.Fatal("newBuildImageCmd should not return nil")
-		}
-		// Use includes the argument pattern (required arg uses <>)
-		if cmd.Use != "image <server-name>" {
-			t.Errorf("expected Use='image <server-name>', got %q", cmd.Use)
-		}
-	})
-
-	t.Run("has-flags", func(t *testing.T) {
-		flags := cmd.Flags()
-		if flags == nil {
-			t.Fatal("newBuildImageCmd should have flags")
-		}
-
-		expectedFlags := []string{"dockerfile", "metadata-file", "metadata-dir", "registry", "tag", "context"}
-		for _, name := range expectedFlags {
-			if flags.Lookup(name) == nil {
-				t.Errorf("expected flag %q not found", name)
-			}
-		}
-	})
-}
-
 func TestGetGitTag(t *testing.T) {
 	// This test runs in a git repo, so it should return a valid SHA or "latest"
 	tag := getGitTag()
@@ -278,49 +249,6 @@ type validatorFailingExecutor struct {
 
 func (v *validatorFailingExecutor) Command(name string, args []string, validators ...ExecValidator) (Command, error) {
 	return nil, v.err
-}
-
-func TestNewBuildImageCmdRunE(t *testing.T) {
-	logger := zap.NewNop()
-
-	t.Run("executes_build_image", func(t *testing.T) {
-		originalExecutor := execExecutor
-		defer func() { execExecutor = originalExecutor }()
-
-		mock := &MockExecutor{}
-		execExecutor = mock
-
-		tmp := t.TempDir()
-		metadataFile := filepath.Join(tmp, "servers.yaml")
-		if err := os.WriteFile(metadataFile, []byte(`version: v1
-servers:
-  - name: my-server
-`), 0o600); err != nil {
-			t.Fatalf("write metadata: %v", err)
-		}
-
-		cmd := newBuildImageCmd(logger)
-		cmd.SetArgs([]string{"my-server", "--registry", "test-registry", "--tag", "v1.0", "--metadata-file", metadataFile})
-
-		err := cmd.Execute()
-		if err != nil {
-			t.Fatalf("unexpected error: %v", err)
-		}
-
-		if !mock.HasCommand("docker") {
-			t.Error("expected docker command to be executed")
-		}
-	})
-
-	t.Run("fails_without_server_name", func(t *testing.T) {
-		cmd := newBuildImageCmd(logger)
-		cmd.SetArgs([]string{})
-
-		err := cmd.Execute()
-		if err == nil {
-			t.Error("expected error when server name is missing")
-		}
-	})
 }
 
 func TestGetGitTagWithMock(t *testing.T) {

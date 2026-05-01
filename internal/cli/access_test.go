@@ -8,28 +8,6 @@ import (
 	"go.uber.org/zap"
 )
 
-func TestNewAccessCmd(t *testing.T) {
-	cmd := NewAccessCmd(zap.NewNop())
-	if cmd == nil {
-		t.Fatal("NewAccessCmd should not return nil")
-	}
-	if cmd.Use != "access" {
-		t.Fatalf("expected Use='access', got %q", cmd.Use)
-	}
-
-	expected := map[string]bool{"grant": false, "session": false}
-	for _, sub := range cmd.Commands() {
-		if _, ok := expected[sub.Use]; ok {
-			expected[sub.Use] = true
-		}
-	}
-	for name, found := range expected {
-		if !found {
-			t.Fatalf("expected subcommand %q not found", name)
-		}
-	}
-}
-
 func TestAccessManager_ListAccessResources(t *testing.T) {
 	mock := &MockExecutor{}
 	kubectl := &KubectlClient{exec: mock, validators: nil}

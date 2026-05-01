@@ -2069,11 +2069,11 @@ _No package overview is documented._
 
 - [`Constants`](#cli-internals-constants)
 - [`Variables`](#cli-internals-variables)
-- [`func BootstrapApplyK3s(kubectl KubectlRunner) error`](#cli-internals-func-bootstrapapplyk3s-kubectl-kubectlrunner-error)
+- [`func ApplyManifestContentWithNamespace(kubectl KubectlRunner, manifest, namespace string) error`](#cli-internals-func-applymanifestcontentwithnamespace-kubectl-kubectlrunner-manifest-namespace-string-error)
+- [`func BuildImage(logger *zap.Logger, serverName, dockerfile, metadataFile, metadataDir, registryURL, tag, context string) error`](#cli-internals-func-buildimage-logger-zap-logger-servername-dockerfile-metadatafile-metadatadir-registryurl-tag-context-string-error)
 - [`func BuildOperatorArgs(metricsAddr, probeAddr string, leaderElect, leaderElectChanged bool) []string`](#cli-internals-func-buildoperatorargs-metricsaddr-probeaddr-string-leaderelect-leaderelectchanged-bool-string)
 - [`func ClusterIssuerNameForACME(staging bool) string`](#cli-internals-func-clusterissuernameforacme-staging-bool-string)
 - [`func Cyan(msg string) string`](#cli-internals-func-cyan-msg-string-string)
-- [`func DetectProvider(kubectl KubectlRunner) (string, error)`](#cli-internals-func-detectprovider-kubectl-kubectlrunner-string-error)
 - [`func Error(msg string)`](#cli-internals-func-error-msg-string)
 - [`func GetAnalyticsIngestURLOverride() string`](#cli-internals-func-getanalyticsingesturloverride-string)
 - [`func GetCertTimeout() time.Duration`](#cli-internals-func-getcerttimeout-time-duration)
@@ -2091,31 +2091,18 @@ _No package overview is documented._
 - [`func GetRegistryPort() int`](#cli-internals-func-getregistryport-int)
 - [`func GetSkopeoImage() string`](#cli-internals-func-getskopeoimage-string)
 - [`func Green(msg string) string`](#cli-internals-func-green-msg-string-string)
+- [`func HasPlatformClient() bool`](#cli-internals-func-hasplatformclient-bool)
 - [`func Header(title string)`](#cli-internals-func-header-title-string)
 - [`func Info(msg string)`](#cli-internals-func-info-msg-string)
 - [`func IsDebugMode() bool`](#cli-internals-func-isdebugmode-bool)
-- [`func NewAccessCmd(logger *zap.Logger) *cobra.Command`](#cli-internals-func-newaccesscmd-logger-zap-logger-cobra-command)
-- [`func NewAccessCmdWithManager(mgr *AccessManager) *cobra.Command`](#cli-internals-func-newaccesscmdwithmanager-mgr-accessmanager-cobra-command)
-- [`func NewBootstrapCmd(logger *zap.Logger) *cobra.Command`](#cli-internals-func-newbootstrapcmd-logger-zap-logger-cobra-command)
-- [`func NewBuildImageCmd(logger *zap.Logger) *cobra.Command`](#cli-internals-func-newbuildimagecmd-logger-zap-logger-cobra-command)
-- [`func NewClusterCertCmdWithManager(mgr *ClusterManager) *cobra.Command`](#cli-internals-func-newclustercertcmdwithmanager-mgr-clustermanager-cobra-command)
-- [`func NewClusterCmd(logger *zap.Logger) *cobra.Command`](#cli-internals-func-newclustercmd-logger-zap-logger-cobra-command)
-- [`func NewClusterCmdWithManager(mgr *ClusterManager) *cobra.Command`](#cli-internals-func-newclustercmdwithmanager-mgr-clustermanager-cobra-command)
-- [`func NewClusterDoctorCmdWithManager(mgr *ClusterManager) *cobra.Command`](#cli-internals-func-newclusterdoctorcmdwithmanager-mgr-clustermanager-cobra-command)
-- [`func NewPipelineCmd(logger *zap.Logger) *cobra.Command`](#cli-internals-func-newpipelinecmd-logger-zap-logger-cobra-command)
-- [`func NewPipelineCmdWithManager(mgr *PipelineManager) *cobra.Command`](#cli-internals-func-newpipelinecmdwithmanager-mgr-pipelinemanager-cobra-command)
-- [`func NewRegistryCmd(logger *zap.Logger) *cobra.Command`](#cli-internals-func-newregistrycmd-logger-zap-logger-cobra-command)
-- [`func NewRegistryCmdWithManager(mgr *RegistryManager) *cobra.Command`](#cli-internals-func-newregistrycmdwithmanager-mgr-registrymanager-cobra-command)
-- [`func NewSentinelCmd(logger *zap.Logger) *cobra.Command`](#cli-internals-func-newsentinelcmd-logger-zap-logger-cobra-command)
-- [`func NewSentinelCmdWithManager(mgr *SentinelManager) *cobra.Command`](#cli-internals-func-newsentinelcmdwithmanager-mgr-sentinelmanager-cobra-command)
-- [`func NewServerCmd(logger *zap.Logger) *cobra.Command`](#cli-internals-func-newservercmd-logger-zap-logger-cobra-command)
-- [`func NewServerCmdWithManager(mgr *ServerManager) *cobra.Command`](#cli-internals-func-newservercmdwithmanager-mgr-servermanager-cobra-command)
-- [`func NewSetupCmd(logger *zap.Logger) *cobra.Command`](#cli-internals-func-newsetupcmd-logger-zap-logger-cobra-command)
-- [`func NewStatusCmd(logger *zap.Logger) *cobra.Command`](#cli-internals-func-newstatuscmd-logger-zap-logger-cobra-command)
+- [`func LogStructuredError(logger *zap.Logger, err error, msg string)`](#cli-internals-func-logstructurederror-logger-zap-logger-err-error-msg-string)
+- [`func NewSetupStepFailedError() error`](#cli-internals-func-newsetupstepfailederror-error)
+- [`func NewWithSentinel(base error, msg string) error`](#cli-internals-func-newwithsentinel-base-error-msg-string-error)
 - [`func NormalizePlatformAPIBaseURL(raw string) string`](#cli-internals-func-normalizeplatformapibaseurl-raw-string-string)
 - [`func PrintDoctorReport(r DoctorReport)`](#cli-internals-func-printdoctorreport-r-doctorreport)
+- [`func ReadFileAtPath(path string) ([]byte, error)`](#cli-internals-func-readfileatpath-path-string-byte-error)
 - [`func Red(msg string) string`](#cli-internals-func-red-msg-string-string)
-- [`func RunBootstrapPreflight(kubectl KubectlRunner) error`](#cli-internals-func-runbootstrappreflight-kubectl-kubectlrunner-error)
+- [`func ResolveRegularFilePath(file string) (string, error)`](#cli-internals-func-resolveregularfilepath-file-string-string-error)
 - [`func RunRegistryProvision(mgr *RegistryManager, url, username, password, operatorImage string) error`](#cli-internals-func-runregistryprovision-mgr-registrymanager-url-username-password-operatorimage-string-error)
 - [`func RunRegistryPush(mgr *RegistryManager, image, registryURL, name, mode, helperNamespace string) error`](#cli-internals-func-runregistrypush-mgr-registrymanager-image-registryurl-name-mode-helpernamespace-string-error)
 - [`func Section(title string)`](#cli-internals-func-section-title-string)
@@ -2131,6 +2118,8 @@ _No package overview is documented._
 - [`func ValidateStorageMode(mode string) error`](#cli-internals-func-validatestoragemode-mode-string-error)
 - [`func ValidateTLSSetupCLIFlags(`](#cli-internals-func-validatetlssetupcliflags)
 - [`func Warn(msg string)`](#cli-internals-func-warn-msg-string)
+- [`func WrapWithSentinel(base, cause error, msg string) error`](#cli-internals-func-wrapwithsentinel-base-cause-error-msg-string-error)
+- [`func WrapWithSentinelAndContext(base, cause error, msg string, context map[string]any) error`](#cli-internals-func-wrapwithsentinelandcontext-base-cause-error-msg-string-context-map-string-any-error)
 - [`func Yellow(msg string) string`](#cli-internals-func-yellow-msg-string-string)
 - [`type AccessManager struct`](#cli-internals-type-accessmanager-struct)
 - [`func DefaultAccessManager(logger *zap.Logger) *AccessManager`](#cli-internals-func-defaultaccessmanager-logger-zap-logger-accessmanager)
@@ -2159,6 +2148,8 @@ _No package overview is documented._
 - [`func (m *ClusterManager) ConfigureKubeconfigFromProvider(provider, region, clusterName, resourceGroup, project, zone, kubeconfig string) error`](#cli-internals-func-m-clustermanager-configurekubeconfigfromprovider-provider-region-clustername-resourcegroup-project-zone-kubeconfig-string-error)
 - [`func (m *ClusterManager) EnsureNamespace(name string) error`](#cli-internals-func-m-clustermanager-ensurenamespace-name-string-error)
 - [`func (m *ClusterManager) InitCluster(kubeconfig, context string) error`](#cli-internals-func-m-clustermanager-initcluster-kubeconfig-context-string-error)
+- [`func (m *ClusterManager) KubectlRunner() KubectlRunner`](#cli-internals-func-m-clustermanager-kubectlrunner-kubectlrunner)
+- [`func (m *ClusterManager) Logger() *zap.Logger`](#cli-internals-func-m-clustermanager-logger-zap-logger)
 - [`func (m *ClusterManager) ProvisionCluster(provider, region string, nodeCount int, clusterName string) error`](#cli-internals-func-m-clustermanager-provisioncluster-provider-region-string-nodecount-int-clustername-string-error)
 - [`type ClusterManagerAPI interface`](#cli-internals-type-clustermanagerapi-interface)
 - [`type Command interface`](#cli-internals-type-command-interface)
@@ -2201,11 +2192,6 @@ _No package overview is documented._
 - [`func (m *MockExecutor) HasCommand(name string) bool`](#cli-internals-func-m-mockexecutor-hascommand-name-string-bool)
 - [`func (m *MockExecutor) LastCommand() ExecSpec`](#cli-internals-func-m-mockexecutor-lastcommand-execspec)
 - [`func (m *MockExecutor) Reset()`](#cli-internals-func-m-mockexecutor-reset)
-- [`type PipelineManager struct`](#cli-internals-type-pipelinemanager-struct)
-- [`func DefaultPipelineManager(logger *zap.Logger) *PipelineManager`](#cli-internals-func-defaultpipelinemanager-logger-zap-logger-pipelinemanager)
-- [`func NewPipelineManager(kubectl *KubectlClient, logger *zap.Logger) *PipelineManager`](#cli-internals-func-newpipelinemanager-kubectl-kubectlclient-logger-zap-logger-pipelinemanager)
-- [`func (m *PipelineManager) DeployCRDs(manifestsDir, namespace string) error`](#cli-internals-func-m-pipelinemanager-deploycrds-manifestsdir-namespace-string-error)
-- [`func (m *PipelineManager) GenerateCRDsFromMetadata(metadataFile, metadataDir, outputDir string) error`](#cli-internals-func-m-pipelinemanager-generatecrdsfrommetadata-metadatafile-metadatadir-outputdir-string-error)
 - [`type Printer struct`](#cli-internals-type-printer-struct)
 - [`func (p *Printer) Cyan(msg string) string`](#cli-internals-func-p-printer-cyan-msg-string-string)
 - [`func (p *Printer) Error(msg string)`](#cli-internals-func-p-printer-error-msg-string)
@@ -2236,9 +2222,10 @@ _No package overview is documented._
 - [`func NewRuntime(logger *zap.Logger) *Runtime`](#cli-internals-func-newruntime-logger-zap-logger-runtime)
 - [`func (r *Runtime) AccessManager() *AccessManager`](#cli-internals-func-r-runtime-accessmanager-accessmanager)
 - [`func (r *Runtime) ClusterManager() *ClusterManager`](#cli-internals-func-r-runtime-clustermanager-clustermanager)
+- [`func (r *Runtime) Executor() Executor`](#cli-internals-func-r-runtime-executor-executor)
+- [`func (r *Runtime) KubectlClient() *KubectlClient`](#cli-internals-func-r-runtime-kubectlclient-kubectlclient)
 - [`func (r *Runtime) KubectlRunner() KubectlRunner`](#cli-internals-func-r-runtime-kubectlrunner-kubectlrunner)
 - [`func (r *Runtime) Logger() *zap.Logger`](#cli-internals-func-r-runtime-logger-zap-logger)
-- [`func (r *Runtime) PipelineManager() *PipelineManager`](#cli-internals-func-r-runtime-pipelinemanager-pipelinemanager)
 - [`func (r *Runtime) RegistryManager() *RegistryManager`](#cli-internals-func-r-runtime-registrymanager-registrymanager)
 - [`func (r *Runtime) SentinelManager() *SentinelManager`](#cli-internals-func-r-runtime-sentinelmanager-sentinelmanager)
 - [`func (r *Runtime) ServerManager() *ServerManager`](#cli-internals-func-r-runtime-servermanager-servermanager)
@@ -2510,9 +2497,14 @@ var DefaultPrinter = &Printer{}
 <a id="cli-internals-functions"></a>
 ### Functions
 
-<a id="cli-internals-func-bootstrapapplyk3s-kubectl-kubectlrunner-error"></a>
+<a id="cli-internals-func-applymanifestcontentwithnamespace-kubectl-kubectlrunner-manifest-namespace-string-error"></a>
 ```text
-func BootstrapApplyK3s(kubectl KubectlRunner) error
+func ApplyManifestContentWithNamespace(kubectl KubectlRunner, manifest, namespace string) error
+```
+
+<a id="cli-internals-func-buildimage-logger-zap-logger-servername-dockerfile-metadatafile-metadatadir-registryurl-tag-context-string-error"></a>
+```text
+func BuildImage(logger *zap.Logger, serverName, dockerfile, metadataFile, metadataDir, registryURL, tag, context string) error
 ```
 
 <a id="cli-internals-func-buildoperatorargs-metricsaddr-probeaddr-string-leaderelect-leaderelectchanged-bool-string"></a>
@@ -2536,11 +2528,6 @@ func ClusterIssuerNameForACME(staging bool) string
 func Cyan(msg string) string
     Cyan returns cyan text.
 
-```
-
-<a id="cli-internals-func-detectprovider-kubectl-kubectlrunner-string-error"></a>
-```text
-func DetectProvider(kubectl KubectlRunner) (string, error)
 ```
 
 <a id="cli-internals-func-error-msg-string"></a>
@@ -2672,6 +2659,11 @@ func Green(msg string) string
 
 ```
 
+<a id="cli-internals-func-hasplatformclient-bool"></a>
+```text
+func HasPlatformClient() bool
+```
+
 <a id="cli-internals-func-header-title-string"></a>
 ```text
 func Header(title string)
@@ -2693,132 +2685,19 @@ func IsDebugMode() bool
 
 ```
 
-<a id="cli-internals-func-newaccesscmd-logger-zap-logger-cobra-command"></a>
+<a id="cli-internals-func-logstructurederror-logger-zap-logger-err-error-msg-string"></a>
 ```text
-func NewAccessCmd(logger *zap.Logger) *cobra.Command
+func LogStructuredError(logger *zap.Logger, err error, msg string)
 ```
 
-<a id="cli-internals-func-newaccesscmdwithmanager-mgr-accessmanager-cobra-command"></a>
+<a id="cli-internals-func-newsetupstepfailederror-error"></a>
 ```text
-func NewAccessCmdWithManager(mgr *AccessManager) *cobra.Command
+func NewSetupStepFailedError() error
 ```
 
-<a id="cli-internals-func-newbootstrapcmd-logger-zap-logger-cobra-command"></a>
+<a id="cli-internals-func-newwithsentinel-base-error-msg-string-error"></a>
 ```text
-func NewBootstrapCmd(logger *zap.Logger) *cobra.Command
-    NewBootstrapCmd provides an on-prem focused bootstrap workflow.
-
-    Production note: this intentionally does not attempt to provision clusters
-    across all distributions. It performs preflights and (optionally) applies a
-    small set of safe, local-distro-specific fixes.
-
-```
-
-<a id="cli-internals-func-newbuildimagecmd-logger-zap-logger-cobra-command"></a>
-```text
-func NewBuildImageCmd(logger *zap.Logger) *cobra.Command
-```
-
-<a id="cli-internals-func-newclustercertcmdwithmanager-mgr-clustermanager-cobra-command"></a>
-```text
-func NewClusterCertCmdWithManager(mgr *ClusterManager) *cobra.Command
-    NewClusterCertCmdWithManager exposes the cert subcommand builder for folder
-    packages.
-
-```
-
-<a id="cli-internals-func-newclustercmd-logger-zap-logger-cobra-command"></a>
-```text
-func NewClusterCmd(logger *zap.Logger) *cobra.Command
-    NewClusterCmd returns the root cluster subcommand (status/init/provision).
-
-```
-
-<a id="cli-internals-func-newclustercmdwithmanager-mgr-clustermanager-cobra-command"></a>
-```text
-func NewClusterCmdWithManager(mgr *ClusterManager) *cobra.Command
-    NewClusterCmdWithManager returns the cluster subcommand using the provided
-    manager.
-
-```
-
-<a id="cli-internals-func-newclusterdoctorcmdwithmanager-mgr-clustermanager-cobra-command"></a>
-```text
-func NewClusterDoctorCmdWithManager(mgr *ClusterManager) *cobra.Command
-    NewClusterDoctorCmdWithManager exposes the doctor subcommand builder for
-    folder packages.
-
-```
-
-<a id="cli-internals-func-newpipelinecmd-logger-zap-logger-cobra-command"></a>
-```text
-func NewPipelineCmd(logger *zap.Logger) *cobra.Command
-    NewPipelineCmd returns the pipeline subcommand for generate/deploy flows.
-
-```
-
-<a id="cli-internals-func-newpipelinecmdwithmanager-mgr-pipelinemanager-cobra-command"></a>
-```text
-func NewPipelineCmdWithManager(mgr *PipelineManager) *cobra.Command
-    NewPipelineCmdWithManager returns the pipeline subcommand using the provided
-    manager.
-
-```
-
-<a id="cli-internals-func-newregistrycmd-logger-zap-logger-cobra-command"></a>
-```text
-func NewRegistryCmd(logger *zap.Logger) *cobra.Command
-    NewRegistryCmd builds the registry subcommand for managing registry
-    lifecycle.
-
-```
-
-<a id="cli-internals-func-newregistrycmdwithmanager-mgr-registrymanager-cobra-command"></a>
-```text
-func NewRegistryCmdWithManager(mgr *RegistryManager) *cobra.Command
-    NewRegistryCmdWithManager returns the registry subcommand using the provided
-    manager.
-
-```
-
-<a id="cli-internals-func-newsentinelcmd-logger-zap-logger-cobra-command"></a>
-```text
-func NewSentinelCmd(logger *zap.Logger) *cobra.Command
-```
-
-<a id="cli-internals-func-newsentinelcmdwithmanager-mgr-sentinelmanager-cobra-command"></a>
-```text
-func NewSentinelCmdWithManager(mgr *SentinelManager) *cobra.Command
-```
-
-<a id="cli-internals-func-newservercmd-logger-zap-logger-cobra-command"></a>
-```text
-func NewServerCmd(logger *zap.Logger) *cobra.Command
-    NewServerCmd returns the server subcommand (build/deploy helpers).
-
-```
-
-<a id="cli-internals-func-newservercmdwithmanager-mgr-servermanager-cobra-command"></a>
-```text
-func NewServerCmdWithManager(mgr *ServerManager) *cobra.Command
-    NewServerCmdWithManager returns the server subcommand using the provided
-    manager. This is useful for testing with mock dependencies.
-
-```
-
-<a id="cli-internals-func-newsetupcmd-logger-zap-logger-cobra-command"></a>
-```text
-func NewSetupCmd(logger *zap.Logger) *cobra.Command
-    NewSetupCmd constructs the top-level setup command for installing the
-    platform.
-
-```
-
-<a id="cli-internals-func-newstatuscmd-logger-zap-logger-cobra-command"></a>
-```text
-func NewStatusCmd(logger *zap.Logger) *cobra.Command
-    NewStatusCmd returns the status subcommand for platform health checks.
-
+func NewWithSentinel(base error, msg string) error
 ```
 
 <a id="cli-internals-func-normalizeplatformapibaseurl-raw-string-string"></a>
@@ -2836,6 +2715,11 @@ func PrintDoctorReport(r DoctorReport)
 
 ```
 
+<a id="cli-internals-func-readfileatpath-path-string-byte-error"></a>
+```text
+func ReadFileAtPath(path string) ([]byte, error)
+```
+
 <a id="cli-internals-func-red-msg-string-string"></a>
 ```text
 func Red(msg string) string
@@ -2843,9 +2727,9 @@ func Red(msg string) string
 
 ```
 
-<a id="cli-internals-func-runbootstrappreflight-kubectl-kubectlrunner-error"></a>
+<a id="cli-internals-func-resolveregularfilepath-file-string-string-error"></a>
 ```text
-func RunBootstrapPreflight(kubectl KubectlRunner) error
+func ResolveRegularFilePath(file string) (string, error)
 ```
 
 <a id="cli-internals-func-runregistryprovision-mgr-registrymanager-url-username-password-operatorimage-string-error"></a>
@@ -2951,6 +2835,16 @@ func ValidateTLSSetupCLIFlags(
 func Warn(msg string)
     Warn prints a warning message.
 
+```
+
+<a id="cli-internals-func-wrapwithsentinel-base-cause-error-msg-string-error"></a>
+```text
+func WrapWithSentinel(base, cause error, msg string) error
+```
+
+<a id="cli-internals-func-wrapwithsentinelandcontext-base-cause-error-msg-string-context-map-string-any-error"></a>
+```text
+func WrapWithSentinelAndContext(base, cause error, msg string, context map[string]any) error
 ```
 
 <a id="cli-internals-func-yellow-msg-string-string"></a>
@@ -3198,6 +3092,21 @@ func (m *ClusterManager) EnsureNamespace(name string) error
 ```text
 func (m *ClusterManager) InitCluster(kubeconfig, context string) error
     InitCluster initializes cluster configuration.
+
+```
+
+<a id="cli-internals-func-m-clustermanager-kubectlrunner-kubectlrunner"></a>
+```text
+func (m *ClusterManager) KubectlRunner() KubectlRunner
+    KubectlRunner exposes the shared kubectl runner for foldered command
+    routing.
+
+```
+
+<a id="cli-internals-func-m-clustermanager-logger-zap-logger"></a>
+```text
+func (m *ClusterManager) Logger() *zap.Logger
+    Logger exposes the shared logger for foldered command routing.
 
 ```
 
@@ -3552,43 +3461,6 @@ func (m *MockExecutor) Reset()
 
 ```
 
-<a id="cli-internals-type-pipelinemanager-struct"></a>
-```text
-type PipelineManager struct {
-	// Has unexported fields.
-}
-    PipelineManager handles pipeline operations with injected dependencies.
-
-```
-
-<a id="cli-internals-func-defaultpipelinemanager-logger-zap-logger-pipelinemanager"></a>
-```text
-func DefaultPipelineManager(logger *zap.Logger) *PipelineManager
-    DefaultPipelineManager returns a PipelineManager using default clients.
-
-```
-
-<a id="cli-internals-func-newpipelinemanager-kubectl-kubectlclient-logger-zap-logger-pipelinemanager"></a>
-```text
-func NewPipelineManager(kubectl *KubectlClient, logger *zap.Logger) *PipelineManager
-    NewPipelineManager creates a PipelineManager with the given dependencies.
-
-```
-
-<a id="cli-internals-func-m-pipelinemanager-deploycrds-manifestsdir-namespace-string-error"></a>
-```text
-func (m *PipelineManager) DeployCRDs(manifestsDir, namespace string) error
-    DeployCRDs deploys CRD files to the cluster.
-
-```
-
-<a id="cli-internals-func-m-pipelinemanager-generatecrdsfrommetadata-metadatafile-metadatadir-outputdir-string-error"></a>
-```text
-func (m *PipelineManager) GenerateCRDsFromMetadata(metadataFile, metadataDir, outputDir string) error
-    GenerateCRDsFromMetadata generates CRD files from metadata.
-
-```
-
 <a id="cli-internals-type-printer-struct"></a>
 ```text
 type Printer struct {
@@ -3817,6 +3689,20 @@ func (r *Runtime) ClusterManager() *ClusterManager
 
 ```
 
+<a id="cli-internals-func-r-runtime-executor-executor"></a>
+```text
+func (r *Runtime) Executor() Executor
+    Executor returns the shared process executor.
+
+```
+
+<a id="cli-internals-func-r-runtime-kubectlclient-kubectlclient"></a>
+```text
+func (r *Runtime) KubectlClient() *KubectlClient
+    KubectlClient returns the shared kubectl client.
+
+```
+
 <a id="cli-internals-func-r-runtime-kubectlrunner-kubectlrunner"></a>
 ```text
 func (r *Runtime) KubectlRunner() KubectlRunner
@@ -3828,13 +3714,6 @@ func (r *Runtime) KubectlRunner() KubectlRunner
 ```text
 func (r *Runtime) Logger() *zap.Logger
     Logger returns the shared logger.
-
-```
-
-<a id="cli-internals-func-r-runtime-pipelinemanager-pipelinemanager"></a>
-```text
-func (r *Runtime) PipelineManager() *PipelineManager
-    PipelineManager returns the pipeline command manager.
 
 ```
 

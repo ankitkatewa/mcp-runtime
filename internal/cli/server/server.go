@@ -171,7 +171,7 @@ For pushing images, use 'registry push'.`,
 		Use:   "build",
 		Short: "Build MCP server images (push via `registry push`)",
 	}
-	buildCmd.AddCommand(cli.NewBuildImageCmd(mgr.Logger()))
+	buildCmd.AddCommand(newBuildImageCmd(mgr.Logger()))
 
 	cmd.AddCommand(listCmd, getCmd, createCmd, applyCmd, exportCmd, patchCmd, deleteCmd, logsCmd, statusCmd, policyCmd, buildCmd)
 	return cmd

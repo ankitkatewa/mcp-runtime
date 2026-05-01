@@ -68,6 +68,10 @@ func newWithSentinel(base error, msg string) error {
 	return errx.FromSentinel(base, lookupSpec, msg, nil)
 }
 
+func NewWithSentinel(base error, msg string) error {
+	return newWithSentinel(base, msg)
+}
+
 // wrapWithSentinel wraps a cause error using the appropriate errx category helper.
 // The base error (sentinel) is used to determine the category, and the message provides context.
 func wrapWithSentinel(base, cause error, msg string) error {
@@ -75,6 +79,10 @@ func wrapWithSentinel(base, cause error, msg string) error {
 		return errx.CreateByCode(errx.CodeCLI, errx.DescCLI, msg, cause)
 	}
 	return errx.FromSentinel(base, lookupSpec, msg, cause)
+}
+
+func WrapWithSentinel(base, cause error, msg string) error {
+	return wrapWithSentinel(base, cause, msg)
 }
 
 // wrapWithSentinelAndContext wraps an error with additional structured context.
@@ -85,6 +93,14 @@ func wrapWithSentinelAndContext(base, cause error, msg string, context map[strin
 		return errxErr.WithContextMap(context)
 	}
 	return err
+}
+
+func WrapWithSentinelAndContext(base, cause error, msg string, context map[string]any) error {
+	return wrapWithSentinelAndContext(base, cause, msg, context)
+}
+
+func NewSetupStepFailedError() error {
+	return newWithSentinel(ErrSetupStepFailed, "cluster doctor found unmet prerequisites; see docs/cluster-readiness.md")
 }
 
 // Sentinel errors for CLI operations.
@@ -303,4 +319,8 @@ func logStructuredError(logger *zap.Logger, err error, msg string) {
 			logger.Error(msg, zap.Error(err))
 		}
 	}
+}
+
+func LogStructuredError(logger *zap.Logger, err error, msg string) {
+	logStructuredError(logger, err, msg)
 }

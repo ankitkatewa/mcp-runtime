@@ -104,7 +104,7 @@ func NewWithManager(mgr *cli.ClusterManager) *cobra.Command {
 	cmd.AddCommand(statusCmd)
 	cmd.AddCommand(configCmd)
 	cmd.AddCommand(provisionCmd)
-	cmd.AddCommand(cli.NewClusterCertCmdWithManager(mgr))
-	cmd.AddCommand(cli.NewClusterDoctorCmdWithManager(mgr))
+	cmd.AddCommand(newClusterCertCmd(mgr))
+	cmd.AddCommand(newClusterDoctorCmd(mgr))
 	return cmd
 }

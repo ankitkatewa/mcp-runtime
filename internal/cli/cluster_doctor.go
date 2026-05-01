@@ -14,8 +14,6 @@ import (
 	"strconv"
 	"strings"
 	"time"
-
-	"github.com/spf13/cobra"
 )
 
 // Distribution identifies a Kubernetes flavor for remediation messaging.
@@ -106,23 +104,6 @@ func (r DoctorReport) AllOK() bool {
 		}
 	}
 	return true
-}
-
-func (m *ClusterManager) newClusterDoctorCmd() *cobra.Command {
-	return &cobra.Command{
-		Use:   "doctor",
-		Short: "Diagnose MCP Runtime cluster readiness and installed components",
-		Long: "Detect the Kubernetes distribution and check that the registry service, cluster DNS, " +
-			"operator/CRD prerequisites, ingress (Traefik) wiring, image pulls, Sentinel, and MCPServer reconciliation are healthy. Prints remediation steps for your distribution " +
-			"when something is missing. See docs/cluster-readiness.md for the full per-distribution checklist.",
-		RunE: func(cmd *cobra.Command, args []string) error {
-			report := RunDoctorAndPrint(m.kubectl)
-			if !report.AllOK() {
-				return newWithSentinel(ErrSetupStepFailed, "cluster doctor found unmet prerequisites; see docs/cluster-readiness.md")
-			}
-			return nil
-		},
-	}
 }
 
 // RunDoctor executes cluster diagnostics and returns a report.

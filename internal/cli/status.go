@@ -8,7 +8,6 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/spf13/cobra"
 	"go.uber.org/zap"
 )
 
@@ -34,20 +33,6 @@ var analyticsStatusWorkloads = []platformWorkload{
 	{Component: "Tempo", Namespace: defaultAnalyticsNamespace, Kind: "statefulset", Name: "tempo"},
 	{Component: "Loki", Namespace: defaultAnalyticsNamespace, Kind: "statefulset", Name: "loki"},
 	{Component: "Promtail", Namespace: defaultAnalyticsNamespace, Kind: "daemonset", Name: "promtail"},
-}
-
-// NewStatusCmd returns the status subcommand for platform health checks.
-func NewStatusCmd(logger *zap.Logger) *cobra.Command {
-	cmd := &cobra.Command{
-		Use:   "status",
-		Short: "Show platform status",
-		Long:  "Show the overall status of the MCP platform",
-		RunE: func(cmd *cobra.Command, args []string) error {
-			return showPlatformStatus(logger)
-		},
-	}
-
-	return cmd
 }
 
 func ShowPlatformStatus(logger *zap.Logger) error {
@@ -149,10 +134,6 @@ func ShowPlatformStatus(logger *zap.Logger) error {
 	Info("Use 'mcp-runtime server list' for detailed server info")
 
 	return nil
-}
-
-func showPlatformStatus(logger *zap.Logger) error {
-	return ShowPlatformStatus(logger)
 }
 
 func checkClusterStatusQuiet() error {

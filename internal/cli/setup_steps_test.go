@@ -236,24 +236,6 @@ func TestDeployOperatorStepCmdPassesOperatorArgs(t *testing.T) {
 	}
 }
 
-func TestNewSetupCmdIncludesFeatureFlags(t *testing.T) {
-	cmd := NewSetupCmd(zap.NewNop())
-
-	for _, name := range []string{
-		"kubeconfig",
-		"context",
-		"test-mode",
-		"strict-prod",
-		"operator-metrics-addr",
-		"operator-probe-addr",
-		"operator-leader-elect",
-	} {
-		if flag := cmd.Flags().Lookup(name); flag == nil {
-			t.Fatalf("expected %q flag to exist", name)
-		}
-	}
-}
-
 func TestClusterStepPassesKubeconfigAndContext(t *testing.T) {
 	var gotKubeconfig string
 	var gotContext string

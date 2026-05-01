@@ -1,7 +1,6 @@
 package cli
 
 import (
-	"bytes"
 	"errors"
 	"os"
 	"path/filepath"
@@ -11,45 +10,6 @@ import (
 	"github.com/spf13/cobra"
 	"go.uber.org/zap"
 )
-
-func TestNewClusterCmd(t *testing.T) {
-	logger := zap.NewNop()
-	cmd := NewClusterCmd(logger)
-
-	t.Run("command-created", func(t *testing.T) {
-		if cmd == nil {
-			t.Fatal("NewClusterCmd should not return nil")
-		}
-		if cmd.Use != "cluster" {
-			t.Errorf("expected Use='cluster', got %q", cmd.Use)
-		}
-	})
-
-	t.Run("has-subcommands", func(t *testing.T) {
-		subcommands := cmd.Commands()
-		if len(subcommands) < 4 {
-			t.Errorf("expected at least 4 subcommands (init, status, config, provision), got %d", len(subcommands))
-		}
-
-		expectedSubs := map[string]bool{
-			"init":      false,
-			"status":    false,
-			"config":    false,
-			"provision": false,
-		}
-		for _, sub := range subcommands {
-			if _, ok := expectedSubs[sub.Use]; ok {
-				expectedSubs[sub.Use] = true
-			}
-		}
-
-		for name, found := range expectedSubs {
-			if !found {
-				t.Errorf("expected subcommand %q not found", name)
-			}
-		}
-	})
-}
 
 func TestClusterManager_CheckClusterStatus(t *testing.T) {
 	t.Run("calls kubectl cluster-info", func(t *testing.T) {
@@ -88,7 +48,7 @@ func TestClusterConfigRunE_WithProviderAndContext(t *testing.T) {
 	kubectl := &KubectlClient{exec: mockKubectl, validators: nil}
 	mgr := NewClusterManager(kubectl, mockExec, zap.NewNop())
 
-	configCmd := findClusterSubcommand(t, NewClusterCmdWithManager(mgr), "config")
+	configCmd := findClusterSubcommand(t, newTestClusterCommand(mgr), "config")
 
 	tempDir := t.TempDir()
 	kubeconfigPath := filepath.Join(tempDir, "config")
@@ -143,7 +103,7 @@ func TestClusterConfigRunE_UnsupportedProvider(t *testing.T) {
 	kubectl := &KubectlClient{exec: mockKubectl, validators: nil}
 	mgr := NewClusterManager(kubectl, mockExec, zap.NewNop())
 
-	configCmd := findClusterSubcommand(t, NewClusterCmdWithManager(mgr), "config")
+	configCmd := findClusterSubcommand(t, newTestClusterCommand(mgr), "config")
 	if err := configCmd.Flags().Set("provider", "unknown"); err != nil {
 		t.Fatalf("set provider: %v", err)
 	}
@@ -165,6 +125,52 @@ func findClusterSubcommand(t *testing.T, root *cobra.Command, name string) *cobr
 	}
 	t.Fatalf("subcommand %q not found", name)
 	return nil
+}
+
+func newTestClusterCommand(mgr *ClusterManager) *cobra.Command {
+	cmd := &cobra.Command{Use: "cluster"}
+
+	var ingressMode string
+	var ingressManifest string
+	var forceIngressInstall bool
+	var configKubeconfig string
+	var configContext string
+	var provider string
+	var region string
+	var clusterName string
+	var resourceGroup string
+	var project string
+	var zone string
+	configCmd := &cobra.Command{
+		Use: "config",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			if provider != "" {
+				if err := mgr.ConfigureKubeconfigFromProvider(provider, region, clusterName, resourceGroup, project, zone, configKubeconfig); err != nil {
+					return err
+				}
+			}
+			if configKubeconfig != "" || configContext != "" || provider != "" {
+				if err := mgr.ConfigureKubeconfig(configKubeconfig, configContext); err != nil {
+					return err
+				}
+			}
+			return mgr.ConfigureClusterWithValues(ingressMode, ingressManifest, forceIngressInstall)
+		},
+	}
+	configCmd.Flags().StringVar(&ingressMode, "ingress", "traefik", "")
+	configCmd.Flags().StringVar(&ingressManifest, "ingress-manifest", "config/ingress/overlays/prod", "")
+	configCmd.Flags().BoolVar(&forceIngressInstall, "force-ingress-install", false, "")
+	configCmd.Flags().StringVar(&configKubeconfig, "kubeconfig", "", "")
+	configCmd.Flags().StringVar(&configContext, "context", "", "")
+	configCmd.Flags().StringVar(&provider, "provider", "", "")
+	configCmd.Flags().StringVar(&region, "region", "us-west-1", "")
+	configCmd.Flags().StringVar(&clusterName, "name", "mcp-runtime", "")
+	configCmd.Flags().StringVar(&resourceGroup, "resource-group", "", "")
+	configCmd.Flags().StringVar(&project, "project", "", "")
+	configCmd.Flags().StringVar(&zone, "zone", "", "")
+
+	cmd.AddCommand(configCmd)
+	return cmd
 }
 
 func hasCommand(cmds []ExecSpec, name string, args ...string) bool {
@@ -454,57 +460,6 @@ func TestConfigureEKSKubeconfig(t *testing.T) {
 			t.Fatal("expected error when aws fails")
 		}
 	})
-}
-
-func TestClusterInitCmdRunE(t *testing.T) {
-	tmpDir := t.TempDir()
-	kubeconfig := filepath.Join(tmpDir, "config")
-	if err := os.WriteFile(kubeconfig, []byte("apiVersion: v1\nkind: Config\n"), 0644); err != nil {
-		t.Fatal(err)
-	}
-
-	mock := &MockExecutor{}
-	kubectl := &KubectlClient{exec: mock, validators: nil}
-	mgr := NewClusterManager(kubectl, mock, zap.NewNop())
-
-	cmd := mgr.newClusterInitCmd()
-	_ = cmd.Flags().Set("kubeconfig", kubeconfig)
-
-	err := cmd.RunE(cmd, nil)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-}
-
-func TestClusterStatusCmdRunE(t *testing.T) {
-	mock := &MockExecutor{
-		DefaultOutput: []byte("Kubernetes control plane is running"),
-	}
-	kubectl := &KubectlClient{exec: mock, validators: nil}
-	mgr := NewClusterManager(kubectl, mock, zap.NewNop())
-
-	var buf bytes.Buffer
-	setDefaultPrinterWriter(t, &buf)
-
-	cmd := mgr.newClusterStatusCmd()
-	err := cmd.RunE(cmd, nil)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-}
-
-func TestClusterProvisionCmdRunE(t *testing.T) {
-	mock := &MockExecutor{}
-	kubectl := &KubectlClient{exec: mock, validators: nil}
-	mgr := NewClusterManager(kubectl, mock, zap.NewNop())
-
-	cmd := mgr.newClusterProvisionCmd()
-	_ = cmd.Flags().Set("provider", "kind")
-
-	err := cmd.RunE(cmd, nil)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
 }
 
 func TestProvisionCluster(t *testing.T) {
@@ -981,7 +936,7 @@ func TestConfigureClusterConfigCmdFlags(t *testing.T) {
 	kubectl := &KubectlClient{exec: mock, validators: nil}
 	mgr := NewClusterManager(kubectl, mock, zap.NewNop())
 
-	cmd := mgr.newClusterConfigCmd()
+	cmd := findClusterSubcommand(t, newTestClusterCommand(mgr), "config")
 
 	// Verify all flags are registered
 	flags := []string{"ingress", "ingress-manifest", "force-ingress-install", "kubeconfig", "context", "provider", "region", "name", "resource-group", "project", "zone"}

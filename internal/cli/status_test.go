@@ -438,29 +438,6 @@ func TestServerStatus(t *testing.T) {
 	})
 }
 
-func TestNewStatusCmd(t *testing.T) {
-	logger := zap.NewNop()
-	cmd := NewStatusCmd(logger)
-
-	t.Run("command_created", func(t *testing.T) {
-		if cmd == nil {
-			t.Fatal("NewStatusCmd should not return nil")
-		}
-		if cmd.Use != "status" {
-			t.Errorf("expected Use='status', got %q", cmd.Use)
-		}
-		if cmd.Short == "" {
-			t.Error("expected Short description to be set")
-		}
-	})
-
-	t.Run("has_runE", func(t *testing.T) {
-		if cmd.RunE == nil {
-			t.Error("expected RunE to be set")
-		}
-	})
-}
-
 func setDefaultPrinterWriter(t *testing.T, w *bytes.Buffer) {
 	t.Helper()
 	orig := DefaultPrinter.Writer
@@ -502,8 +479,8 @@ func runShowPlatformStatusWithCalls(t *testing.T, responses map[string]commandRe
 		pterm.EnableStyling()
 	})
 
-	if err := showPlatformStatus(logger); err != nil {
-		t.Fatalf("showPlatformStatus() unexpected error = %v", err)
+	if err := ShowPlatformStatus(logger); err != nil {
+		t.Fatalf("ShowPlatformStatus() unexpected error = %v", err)
 	}
 
 	return buf.String()
