@@ -1762,6 +1762,18 @@ type DoctorCheck struct {
 }
     DoctorCheck is a single preflight check result.
 
+type DoctorCheckProgress func(DoctorCheckProgressEvent) func(DoctorCheck)
+    DoctorCheckProgress is called before each doctor check starts. It returns an
+    optional completion callback that receives the finished check result.
+
+type DoctorCheckProgressEvent struct {
+	Name   string
+	Detail string
+	Index  int
+	Total  int
+}
+    DoctorCheckProgressEvent describes the check that is about to run.
+
 type DoctorReport struct {
 	Distribution Distribution
 	Checks       []DoctorCheck
@@ -1770,6 +1782,13 @@ type DoctorReport struct {
 
 func RunDoctor(kubectl KubectlRunner) DoctorReport
     RunDoctor executes cluster diagnostics and returns a report.
+
+func RunDoctorAndPrint(kubectl KubectlRunner) DoctorReport
+    RunDoctorAndPrint streams doctor progress and results as checks execute.
+
+func RunDoctorWithProgress(kubectl KubectlRunner, progress DoctorCheckProgress) DoctorReport
+    RunDoctorWithProgress executes cluster diagnostics and calls progress hooks
+    before and after each check. It is useful for UIs that need live feedback.
 
 func (r DoctorReport) AllOK() bool
     AllOK reports whether every check passed.
