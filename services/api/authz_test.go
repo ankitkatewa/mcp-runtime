@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -74,5 +75,60 @@ func TestRequireRole(t *testing.T) {
 	handler.ServeHTTP(rec, req)
 	if rec.Code != http.StatusForbidden {
 		t.Fatalf("status = %d, want %d", rec.Code, http.StatusForbidden)
+	}
+}
+
+func TestPrincipalUserIDPrefersInternalUserID(t *testing.T) {
+	p := principal{
+		Subject: "google-sub-123",
+		UserID:  "6d5d8c5a-4c8d-4e50-9e34-3d6439f1aa55",
+	}
+
+	if got := p.userID(); got != p.UserID {
+		t.Fatalf("userID() = %q, want %q", got, p.UserID)
+	}
+
+	legacy := principal{Subject: "legacy-subject"}
+	if got := legacy.userID(); got != "legacy-subject" {
+		t.Fatalf("legacy userID() = %q, want legacy-subject", got)
+	}
+}
+
+func TestHandleAuthMeReturnsPrincipalSubject(t *testing.T) {
+	srv := &apiServer{}
+	req := httptest.NewRequest(http.MethodGet, "/api/auth/me", nil)
+	req = req.WithContext(context.WithValue(req.Context(), principalContextKey{}, principal{
+		Role:      roleUser,
+		Subject:   "google-sub-123",
+		UserID:    "6d5d8c5a-4c8d-4e50-9e34-3d6439f1aa55",
+		Email:     "user@example.com",
+		Namespace: "user-17",
+	}))
+	rec := httptest.NewRecorder()
+
+	srv.handleAuthMe(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d", rec.Code, http.StatusOK)
+	}
+
+	var payload struct {
+		Authenticated bool `json:"authenticated"`
+		Principal     struct {
+			Subject string `json:"subject"`
+			Email   string `json:"email"`
+		} `json:"principal"`
+	}
+	if err := json.NewDecoder(rec.Body).Decode(&payload); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if !payload.Authenticated {
+		t.Fatal("authenticated = false, want true")
+	}
+	if payload.Principal.Subject != "google-sub-123" {
+		t.Fatalf("principal.subject = %q, want google-sub-123", payload.Principal.Subject)
+	}
+	if payload.Principal.Email != "user@example.com" {
+		t.Fatalf("principal.email = %q, want user@example.com", payload.Principal.Email)
 	}
 }

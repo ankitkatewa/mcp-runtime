@@ -183,7 +183,7 @@ func (s *apiServer) handleSignup(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if s.runtime != nil {
-		if err := s.runtime.ensureUserNamespace(r.Context(), principal{Subject: u.ID, Role: u.Role, Email: u.Email, Namespace: u.Namespace}); err != nil {
+		if err := s.runtime.ensureUserNamespace(r.Context(), principal{Subject: u.ID, UserID: u.ID, Role: u.Role, Email: u.Email, Namespace: u.Namespace}); err != nil {
 			s.platform.WriteAudit(r.Context(), auditEvent{UserID: u.ID, Action: "namespace_create", Resource: u.Namespace, Namespace: u.Namespace, Status: "error", Message: err.Error(), ActorIP: requestIP(r)})
 			if cleanupErr := s.platform.DeleteUser(r.Context(), u.ID); cleanupErr != nil {
 				log.Printf("signup cleanup failed for user %s: %v", u.ID, cleanupErr)

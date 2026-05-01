@@ -86,6 +86,7 @@ func (s *RuntimeServer) AuthenticateUserAPIKey(ctx context.Context, rawKey strin
 		return principal{
 			Role:     roleUser,
 			Subject:  rec.UserID,
+			UserID:   rec.UserID,
 			AuthType: "user_api_key",
 			APIKeyID: rec.ID,
 		}, true, nil

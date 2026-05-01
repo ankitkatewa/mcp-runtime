@@ -445,10 +445,11 @@ SELECT u.id, u.email, u.role, COALESCE(n.namespace, '')
 FROM users u
 LEFT JOIN namespaces n ON n.user_id = u.id AND n.deleted_at IS NULL
 WHERE u.id = $1 AND u.deleted_at IS NULL`, subject).
-		Scan(&p.Subject, &p.Email, &p.Role, &p.Namespace)
+		Scan(&p.UserID, &p.Email, &p.Role, &p.Namespace)
 	if err != nil {
 		return principal{}, false
 	}
+	p.Subject = p.UserID
 	p.AuthType = "platform_jwt"
 	return p, true
 }
@@ -470,7 +471,7 @@ WHERE ak.key_hash = $1 AND ak.revoked = false`, targetHash).
 		return principal{}, false, err
 	}
 	_, _ = s.db.ExecContext(ctx, `UPDATE api_keys SET last_used_at = now() WHERE id = $1 AND (last_used_at IS NULL OR last_used_at < now() - interval '5 minutes')`, keyID)
-	return principal{Role: role, Subject: userID, Email: email, Namespace: namespace, AuthType: "user_api_key", APIKeyID: keyID}, true, nil
+	return principal{Role: role, Subject: userID, UserID: userID, Email: email, Namespace: namespace, AuthType: "user_api_key", APIKeyID: keyID}, true, nil
 }
 
 func (s *platformStore) ListUserAPIKeys(ctx context.Context, userID string) ([]userAPIKeySummary, error) {

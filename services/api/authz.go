@@ -13,6 +13,7 @@ const (
 type principal struct {
 	Role      string `json:"role"`
 	Subject   string `json:"subject,omitempty"`
+	UserID    string `json:"-"`
 	Email     string `json:"email,omitempty"`
 	Namespace string `json:"namespace,omitempty"`
 	AuthType  string `json:"auth_type,omitempty"`
@@ -21,6 +22,9 @@ type principal struct {
 }
 
 func (p principal) userID() string {
+	if userID := strings.TrimSpace(p.UserID); userID != "" {
+		return userID
+	}
 	return strings.TrimSpace(p.Subject)
 }
 

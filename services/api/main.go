@@ -684,7 +684,8 @@ func (s *apiServer) authenticateRequest(r *http.Request) (principal, bool, error
 		}
 		return principal{
 			Role:      u.Role,
-			Subject:   u.ID,
+			Subject:   sub,
+			UserID:    u.ID,
 			Email:     u.Email,
 			Namespace: u.Namespace,
 			AuthType:  "oidc_jwt",
